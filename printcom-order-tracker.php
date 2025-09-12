@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     1.5.3
+ * Version:     1.5.4
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -782,8 +782,16 @@ class Printcom_Order_Tracker {
                 return new WP_Error('printcom_auth_error', 'Kon JWT niet vinden in login-response. Raw: ' . sanitize_text_field($raw));
             }
 
-            // Normaliseer: verwijder eventueel "Bearer " voorvoegsel
-            $token = preg_replace('/^\s*Bearer\s+/i', '', (string)$token);
+            // Normaliseer token: verwijder "Bearer " en eventuele omringende quotes
+            $token = (string) $token;
+            $token = preg_replace('/^\s*Bearer\s+/i', '', $token);
+            $token = trim($token);
+
+            // Strip omringende dubbele of enkele quotes (sommige endpoints geven een JSON string literal terug)
+            if ((substr($token, 0, 1) === '"'  && substr($token, -1) === '"') ||
+                (substr($token, 0, 1) === "'"  && substr($token, -1) === "'")) {
+                $token = substr($token, 1, -1);
+            }
 
             set_transient(self::TRANSIENT_TOKEN, $token, max(60, (7 * DAY_IN_SECONDS) - 60));
             return $token;
@@ -843,8 +851,16 @@ class Printcom_Order_Tracker {
             return new WP_Error('printcom_auth_error', 'Kon access_token niet vinden in auth-response. Raw: ' . sanitize_text_field($raw));
         }
 
-        // Normaliseer: verwijder eventueel "Bearer " voorvoegsel
-        $token = preg_replace('/^\s*Bearer\s+/i', '', (string)$token);
+        // Normaliseer token: verwijder "Bearer " en eventuele omringende quotes
+        $token = (string) $token;
+        $token = preg_replace('/^\s*Bearer\s+/i', '', $token);
+        $token = trim($token);
+
+        // Strip omringende dubbele of enkele quotes (sommige endpoints geven een JSON string literal terug)
+        if ((substr($token, 0, 1) === '"'  && substr($token, -1) === '"') ||
+            (substr($token, 0, 1) === "'"  && substr($token, -1) === "'")) {
+            $token = substr($token, 1, -1);
+        }
 
         set_transient(self::TRANSIENT_TOKEN, $token, max(60, $expires - 60));
         return $token;
