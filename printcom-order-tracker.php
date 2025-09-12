@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     1.5.2
+ * Version:     1.5.3
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -1037,9 +1037,8 @@ add_action('admin_post_printcom_ot_test_order', function(){
     if ($order === '') $order = 'DEMO';
 
     $plugin = new Printcom_Order_Tracker();
-
-    // Forceer vers token (debug)
     delete_transient(Printcom_Order_Tracker::TRANSIENT_TOKEN);
+
     try {
         $ref = new ReflectionClass($plugin);
         $m   = $ref->getMethod('get_access_token'); $m->setAccessible(true);
@@ -1051,7 +1050,6 @@ add_action('admin_post_printcom_ot_test_order', function(){
     if (is_wp_error($token)) {
         $msg = '❌ Tokenfout: ' . esc_html($token->get_error_message());
     } else {
-        // Laat token-shape zien (veilig: alleen eerste 16 tekens)
         $prefix = substr($token, 0, 16);
         $len    = strlen($token);
 
@@ -1072,12 +1070,20 @@ add_action('admin_post_printcom_ot_test_order', function(){
         } else {
             $code = wp_remote_retrieve_response_code($res);
             $raw  = wp_remote_retrieve_body($res);
+            $hdrs = wp_remote_retrieve_headers($res);
             $body_preview = $raw ? mb_substr($raw, 0, 260) : '';
+
+            $hints = [];
+            foreach (['www-authenticate','x-request-id','server'] as $h) {
+                if (!empty($hdrs[$h])) { $hints[] = strtoupper($h).': '.$hdrs[$h]; }
+            }
+
             $msg = '🔎 Token: len='.$len.', starts="'.esc_html($prefix).'" | ';
             if ($code >= 200 && $code < 300) {
                 $msg .= '✅ Order OK ('.$code.'). Body ~'.strlen($raw).' bytes.';
             } else {
                 $msg .= '❌ Order fout ('.$code.'). '.($body_preview ? 'Body: '.sanitize_text_field($body_preview) : 'Geen body.');
+                if ($hints) $msg .= ' | Hdr: '.esc_html(implode(' | ', $hints));
             }
         }
     }
