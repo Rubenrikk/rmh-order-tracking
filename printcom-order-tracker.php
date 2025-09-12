@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     1.4.0
+ * Version:     1.4.1
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -180,6 +180,15 @@ class Printcom_Order_Tracker {
                 <?php settings_fields(self::OPT_SETTINGS); do_settings_sections(self::OPT_SETTINGS); submit_button(); ?>
             </form>
             <hr/>
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="margin-top:10px;">
+                <?php wp_nonce_field('printcom_ot_test_conn', 'printcom_ot_test_conn_nonce'); ?>
+                <input type="hidden" name="action" value="printcom_ot_test_connection"/>
+                <button class="button button-secondary">Verbinding testen</button>
+                <p class="description">Test login op <code><?php echo esc_html(($this->get_settings()['auth_url'] ?? '')); ?></code> en toon de API-respons.</p>
+            </form>
+            <?php if (!empty($_GET['printcom_test_result'])): ?>
+                <div class="notice notice-info" style="margin-top:10px;"><p><?php echo wp_kses_post(wp_unslash($_GET['printcom_test_result'])); ?></p></div>
+            <?php endif; ?>
             <p><strong>Tip:</strong> Gebruik <code>https://api.print.com/login</code> met grant type <code>password</code> en je klantlogin. Token wordt 7 dagen bewaard en dagelijks ververst.</p>
         </div>
         <?php
@@ -256,7 +265,7 @@ class Printcom_Order_Tracker {
             $postarr = ['ID' => $page_id, 'post_title' => $title];
             $existing = get_post($page_id);
             if ($existing && strpos($existing->post_content, '[print_order_status') === false) {
-                $postarr['post_content'] = $existing->post_content . "\n\n" . $content;
+                $postarr['post_content'] = $existing->post_content + "\n\n" . $content;
             }
             wp_update_post($postarr);
         } else {
@@ -637,11 +646,25 @@ class Printcom_Order_Tracker {
 
             $code = wp_remote_retrieve_response_code($res);
             $raw  = wp_remote_retrieve_body($res);
-            if ($code < 200 || $code >= 300) {
-                return new WP_Error('printcom_auth_error', 'Auth fout (' . (int)$code . '). Controleer login & URL.');
-            }
-            $json = json_decode($raw, true);
 
+            if ($code === 401) {
+                // Verbeterde foutmelding (Patch 1)
+                $err = 'Auth fout (401). Controleer login & URL.';
+                $json = json_decode($raw, true);
+                if (is_array($json)) {
+                    if (!empty($json['message'])) $err .= ' Detail: ' . sanitize_text_field($json['message']);
+                    if (!empty($json['error']))   $err .= ' (' . sanitize_text_field($json['error']) . ')';
+                } elseif (!empty($raw)) {
+                    $err .= ' Detail: ' . sanitize_text_field($raw);
+                }
+                return new WP_Error('printcom_auth_error', $err);
+            }
+
+            if ($code < 200 || $code >= 300) {
+                return new WP_Error('printcom_auth_error', 'Auth fout (' . (int)$code . '). Raw: ' . sanitize_text_field($raw));
+            }
+
+            $json = json_decode($raw, true);
             $token = null;
             if (is_array($json)) {
                 $token = $json['access_token'] ?? $json['token'] ?? $json['jwt'] ?? null;
@@ -651,7 +674,7 @@ class Printcom_Order_Tracker {
                 $token = trim($raw);
             }
             if (!$token) {
-                return new WP_Error('printcom_auth_error', 'Kon JWT niet vinden in login-response.');
+                return new WP_Error('printcom_auth_error', 'Kon JWT niet vinden in login-response. Raw: ' . sanitize_text_field($raw));
             }
 
             // Geldig ±168 uur -> 7 dagen; marge -60s
@@ -689,8 +712,21 @@ class Printcom_Order_Tracker {
 
         $code = wp_remote_retrieve_response_code($res);
         $raw  = wp_remote_retrieve_body($res);
+
+        if ($code === 401) {
+            $err = 'Auth fout (401). Controleer OAuth en credentials.';
+            $json = json_decode($raw, true);
+            if (is_array($json)) {
+                if (!empty($json['error_description'])) $err .= ' ' . sanitize_text_field($json['error_description']);
+                if (!empty($json['error'])) $err .= ' (' . sanitize_text_field($json['error']) . ')';
+            } elseif (!empty($raw)) {
+                $err .= ' Detail: ' . sanitize_text_field($raw);
+            }
+            return new WP_Error('printcom_auth_error', $err);
+        }
+
         if ($code < 200 || $code >= 300) {
-            return new WP_Error('printcom_auth_error', 'Auth fout (' . (int)$code . '). Controleer instellingen.');
+            return new WP_Error('printcom_auth_error', 'Auth fout (' . (int)$code . '). Raw: ' . sanitize_text_field($raw));
         }
 
         $json = json_decode($raw, true);
@@ -701,7 +737,7 @@ class Printcom_Order_Tracker {
         $token   = $json['access_token'] ?? null;
         $expires = isset($json['expires_in']) ? (int)$json['expires_in'] : (7 * DAY_IN_SECONDS);
         if (!$token) {
-            return new WP_Error('printcom_auth_error', 'Kon access_token niet vinden in auth-response.');
+            return new WP_Error('printcom_auth_error', 'Kon access_token niet vinden in auth-response. Raw: ' . sanitize_text_field($raw));
         }
         $ttl = max(60, $expires - 60);
         set_transient(self::TRANSIENT_TOKEN, $token, $ttl);
@@ -836,6 +872,33 @@ class Printcom_Order_Tracker {
 // Hooks activeren/deactiveren
 register_activation_hook(__FILE__, ['Printcom_Order_Tracker', 'activate']);
 register_deactivation_hook(__FILE__, ['Printcom_Order_Tracker', 'deactivate']);
+
+// Admin-post handler: "Verbinding testen" (Patch 2)
+add_action('admin_post_printcom_ot_test_connection', function(){
+    if (!current_user_can('manage_options')) wp_die('Unauthorized');
+    if (empty($_POST['printcom_ot_test_conn_nonce']) || !wp_verify_nonce($_POST['printcom_ot_test_conn_nonce'], 'printcom_ot_test_conn')) {
+        wp_die('Nonce invalid');
+    }
+    // Nieuwe instance aanmaken en geforceerd token ophalen
+    $plugin = new Printcom_Order_Tracker();
+    delete_transient(Printcom_Order_Tracker::TRANSIENT_TOKEN);
+    try {
+        $ref = new ReflectionClass($plugin);
+        $m   = $ref->getMethod('get_access_token');
+        $m->setAccessible(true);
+        $token = $m->invoke($plugin, true);
+    } catch (Throwable $e) {
+        $token = new WP_Error('exception', $e->getMessage());
+    }
+
+    if (is_wp_error($token)) {
+        $msg = '❌ Verbindingsfout: ' . esc_html($token->get_error_message());
+    } else {
+        $msg = '✅ Verbinding OK. Token lengte: ' . strlen($token) . ' tekens.';
+    }
+    wp_safe_redirect(add_query_arg('printcom_test_result', rawurlencode($msg), wp_get_referer() ?: admin_url('options-general.php?page=printcom-orders-settings')));
+    exit;
+});
 
 // Start plugin
 new Printcom_Order_Tracker();
