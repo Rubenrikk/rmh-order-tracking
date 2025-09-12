@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     1.0.0
+ * Version:     1.4.0
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -13,7 +13,8 @@ if (!defined('ABSPATH')) exit;
 class Printcom_Order_Tracker {
     const OPT_SETTINGS     = 'printcom_ot_settings';       // array met API settings
     const OPT_MAPPINGS     = 'printcom_ot_mappings';       // orderNummer => page_id
-    const TRANSIENT_TOKEN  = 'printcom_ot_token';          // access_token transient
+    const OPT_STATE        = 'printcom_ot_state';          // orderNummer => ['status'=>..., 'complete_at'=>ts|null, 'last_seen'=>ts|null]
+    const TRANSIENT_TOKEN  = 'printcom_ot_token';          // access_token/JWT transient
     const TRANSIENT_PREFIX = 'printcom_ot_cache_';         // cache per order
     const META_IMG_ID      = '_printcom_ot_image_id';      // attachment ID voor custom afbeelding
 
@@ -29,14 +30,49 @@ class Printcom_Order_Tracker {
         add_action('add_meta_boxes', [$this, 'add_metabox']);
         add_action('save_post', [$this, 'save_metabox']);
 
-        // Enqueue stijl op frontend
+        // Frontend styles
         add_action('wp_enqueue_scripts', [$this, 'enqueue_styles']);
 
-        // Veiligheidsfilter: nooit bedragen tonen (wij renderen ze simpelweg niet)
+        // Cron schedules & actions
+        add_filter('cron_schedules', [$this, 'add_every5_schedule']);
+        add_action('printcom_ot_cron_refresh_token', [$this, 'cron_refresh_token']);
+        add_action('printcom_ot_cron_warm_cache',   [$this, 'cron_warm_cache']);
     }
 
     /* ===========================
-     * Admin pagina's en settings
+     * Activatie/Deactivatie (cron)
+     * =========================== */
+
+    public static function activate() {
+        // Dagelijks token refresh 03:00 (server-tijd)
+        if (!wp_next_scheduled('printcom_ot_cron_refresh_token')) {
+            $t = strtotime('03:00:00');
+            if ($t <= time()) $t = strtotime('tomorrow 03:00:00');
+            wp_schedule_event($t, 'daily', 'printcom_ot_cron_refresh_token');
+        }
+        // Warm cache elke 5 minuten
+        if (!wp_next_scheduled('printcom_ot_cron_warm_cache')) {
+            wp_schedule_event(time() + 300, 'every5min', 'printcom_ot_cron_warm_cache');
+        }
+    }
+
+    public static function deactivate() {
+        $ts = wp_next_scheduled('printcom_ot_cron_refresh_token');
+        if ($ts) wp_unschedule_event($ts, 'printcom_ot_cron_refresh_token');
+        $ts2 = wp_next_scheduled('printcom_ot_cron_warm_cache');
+        if ($ts2) wp_unschedule_event($ts2, 'printcom_ot_cron_warm_cache');
+    }
+
+    public function add_every5_schedule($schedules) {
+        $schedules['every5min'] = [
+            'interval' => 300,
+            'display'  => 'Every 5 Minutes'
+        ];
+        return $schedules;
+    }
+
+    /* ===========================
+     * Admin menu & instellingen
      * =========================== */
 
     public function admin_menu() {
@@ -71,44 +107,44 @@ class Printcom_Order_Tracker {
                 esc_attr(self::OPT_SETTINGS), esc_attr($s['api_base_url'] ?? 'https://api.print.com'));
         }, self::OPT_SETTINGS, 'printcom_ot_section');
 
-        add_settings_field('auth_url', 'Auth URL (token endpoint)', function() {
+        add_settings_field('auth_url', 'Auth URL (login endpoint)', function() {
             $s = $this->get_settings();
-            printf('<input type="url" name="%s[auth_url]" value="%s" class="regular-text" placeholder="https://auth.print.com/oauth/token"/>',
-                esc_attr(self::OPT_SETTINGS), esc_attr($s['auth_url'] ?? ''));
-            echo '<p class="description">Volledige URL van het token endpoint.</p>';
+            printf('<input type="url" name="%s[auth_url]" value="%s" class="regular-text" placeholder="https://api.print.com/login"/>',
+                esc_attr(self::OPT_SETTINGS), esc_attr($s['auth_url'] ?? 'https://api.print.com/login'));
+            echo '<p class="description">Voor Print.com: <code>https://api.print.com/login</code> (JWT ±168 uur).</p>';
         }, self::OPT_SETTINGS, 'printcom_ot_section');
 
         add_settings_field('grant_type', 'Grant type', function() {
             $s = $this->get_settings();
-            $val = $s['grant_type'] ?? 'client_credentials';
+            $val = $s['grant_type'] ?? 'password';
             ?>
             <select name="<?php echo esc_attr(self::OPT_SETTINGS); ?>[grant_type]">
-                <option value="client_credentials" <?php selected($val, 'client_credentials'); ?>>client_credentials</option>
-                <option value="password" <?php selected($val, 'password'); ?>>password</option>
+                <option value="password" <?php selected($val, 'password'); ?>>password (Print.com /login)</option>
+                <option value="client_credentials" <?php selected($val, 'client_credentials'); ?>>client_credentials (fallback)</option>
             </select>
-            <p class="description">Kies de juiste flow. Gebruik <code>client_credentials</code> met Client ID/Secret, of <code>password</code> met Username/Password.</p>
+            <p class="description">Gebruik <code>password</code> met jouw Username/Password voor <code>/login</code>.</p>
             <?php
         }, self::OPT_SETTINGS, 'printcom_ot_section');
 
-        add_settings_field('client_id', 'Client ID', function() {
+        add_settings_field('client_id', 'Client ID (optioneel)', function() {
             $s = $this->get_settings();
             printf('<input type="text" name="%s[client_id]" value="%s" class="regular-text" autocomplete="off"/>',
                 esc_attr(self::OPT_SETTINGS), esc_attr($s['client_id'] ?? ''));
         }, self::OPT_SETTINGS, 'printcom_ot_section');
 
-        add_settings_field('client_secret', 'Client Secret', function() {
+        add_settings_field('client_secret', 'Client Secret (optioneel)', function() {
             $s = $this->get_settings();
             printf('<input type="password" name="%s[client_secret]" value="%s" class="regular-text" autocomplete="new-password"/>',
                 esc_attr(self::OPT_SETTINGS), esc_attr($s['client_secret'] ?? ''));
         }, self::OPT_SETTINGS, 'printcom_ot_section');
 
-        add_settings_field('username', 'Username (password grant)', function() {
+        add_settings_field('username', 'Username (Print.com login)', function() {
             $s = $this->get_settings();
             printf('<input type="text" name="%s[username]" value="%s" class="regular-text" autocomplete="off"/>',
                 esc_attr(self::OPT_SETTINGS), esc_attr($s['username'] ?? ''));
         }, self::OPT_SETTINGS, 'printcom_ot_section');
 
-        add_settings_field('password', 'Password (password grant)', function() {
+        add_settings_field('password', 'Password (Print.com login)', function() {
             $s = $this->get_settings();
             printf('<input type="password" name="%s[password]" value="%s" class="regular-text" autocomplete="new-password"/>',
                 esc_attr(self::OPT_SETTINGS), esc_attr($s['password'] ?? ''));
@@ -116,40 +152,35 @@ class Printcom_Order_Tracker {
 
         add_settings_field('default_cache_ttl', 'Cache (minuten)', function() {
             $s = $this->get_settings();
-            $ttl = isset($s['default_cache_ttl']) ? (int)$s['default_cache_ttl'] : 30;
+            $ttl = isset($s['default_cache_ttl']) ? (int)$s['default_cache_ttl'] : 5;
             printf('<input type="number" min="0" step="1" name="%s[default_cache_ttl]" value="%d" class="small-text"/>',
                 esc_attr(self::OPT_SETTINGS), $ttl);
-            echo '<p class="description">API-responses cache in minuten (0 = uit). Aanbevolen 30.</p>';
+            echo '<p class="description">Basis cache in minuten (0 = uit). Dynamische TTL overschrijft dit meestal: HOT=5m, COLD=24u.</p>';
         }, self::OPT_SETTINGS, 'printcom_ot_section');
     }
 
     public function sanitize_settings($input) {
         $out = [];
         $out['api_base_url']      = isset($input['api_base_url']) ? trim(esc_url_raw($input['api_base_url'])) : 'https://api.print.com';
-        $out['auth_url']          = isset($input['auth_url']) ? trim(esc_url_raw($input['auth_url'])) : '';
-        $out['grant_type']        = in_array($input['grant_type'] ?? 'client_credentials', ['client_credentials','password'], true) ? $input['grant_type'] : 'client_credentials';
+        $out['auth_url']          = isset($input['auth_url']) ? trim(esc_url_raw($input['auth_url'])) : 'https://api.print.com/login';
+        $out['grant_type']        = in_array($input['grant_type'] ?? 'password', ['client_credentials','password'], true) ? $input['grant_type'] : 'password';
         $out['client_id']         = sanitize_text_field($input['client_id'] ?? '');
         $out['client_secret']     = sanitize_text_field($input['client_secret'] ?? '');
         $out['username']          = sanitize_text_field($input['username'] ?? '');
         $out['password']          = sanitize_text_field($input['password'] ?? '');
-        $out['default_cache_ttl'] = max(0, (int)($input['default_cache_ttl'] ?? 30));
+        $out['default_cache_ttl'] = max(0, (int)($input['default_cache_ttl'] ?? 5));
         return $out;
     }
 
     public function settings_page() {
-        if (!current_user_can('manage_options')) return;
-        ?>
+        if (!current_user_can('manage_options')) return; ?>
         <div class="wrap">
             <h1>Print.com Orders — Instellingen</h1>
             <form method="post" action="options.php">
-                <?php
-                settings_fields(self::OPT_SETTINGS);
-                do_settings_sections(self::OPT_SETTINGS);
-                submit_button();
-                ?>
+                <?php settings_fields(self::OPT_SETTINGS); do_settings_sections(self::OPT_SETTINGS); submit_button(); ?>
             </form>
             <hr/>
-            <p><strong>Let op:</strong> Zorg dat je de juiste Auth URL en grant type gebruikt. Als <code>expires_in</code> niet in de token-response zit, gebruikt de plugin standaard 7 dagen.</p>
+            <p><strong>Tip:</strong> Gebruik <code>https://api.print.com/login</code> met grant type <code>password</code> en je klantlogin. Token wordt 7 dagen bewaard en dagelijks ververst.</p>
         </div>
         <?php
     }
@@ -164,7 +195,7 @@ class Printcom_Order_Tracker {
                 $page_id = $this->create_or_update_page_for_order($orderNum);
                 if ($page_id) {
                     $url = get_permalink($page_id);
-                    $message = sprintf('Pagina voor order <strong>%s</strong> is aangemaakt/bijgewerkt: <a href="%s" target="_blank">%s</a>', esc_html($orderNum), esc_url($url), esc_html($url));
+                    $message = sprintf('Pagina voor order <strong>%s</strong> is aangemaakt/bijgewerkt: <a href="%s" target="_blank" rel="noopener">%s</a>', esc_html($orderNum), esc_url($url), esc_html($url));
                 } else {
                     $message = 'Er ging iets mis bij het aanmaken of bijwerken van de pagina.';
                 }
@@ -172,7 +203,6 @@ class Printcom_Order_Tracker {
         }
 
         $mappings = get_option(self::OPT_MAPPINGS, []);
-
         ?>
         <div class="wrap">
             <h1>Print.com Orders</h1>
@@ -196,17 +226,14 @@ class Printcom_Order_Tracker {
             <h2>Bestaande orderpagina’s</h2>
             <?php if (!empty($mappings)): ?>
                 <table class="widefat striped">
-                    <thead>
-                        <tr><th>Ordernummer</th><th>Pagina</th><th>Link</th></tr>
-                    </thead>
+                    <thead><tr><th>Ordernummer</th><th>Pagina</th><th>Link</th></tr></thead>
                     <tbody>
-                    <?php foreach ($mappings as $order => $pid): 
-                        $link = get_permalink($pid);
-                        ?>
+                    <?php foreach ($mappings as $order => $pid):
+                        $link = get_permalink($pid); ?>
                         <tr>
                             <td><?php echo esc_html($order); ?></td>
                             <td><?php echo esc_html(get_the_title($pid)); ?> (ID: <?php echo (int)$pid; ?>)</td>
-                            <td><a href="<?php echo esc_url($link); ?>" target="_blank"><?php echo esc_html($link); ?></a></td>
+                            <td><a href="<?php echo esc_url($link); ?>" target="_blank" rel="noopener"><?php echo esc_html($link); ?></a></td>
                         </tr>
                     <?php endforeach; ?>
                     </tbody>
@@ -225,20 +252,14 @@ class Printcom_Order_Tracker {
         $content  = $shortcode;
 
         if (isset($mappings[$orderNum]) && get_post_status((int)$mappings[$orderNum])) {
-            // Bijwerken: laat content minimaal de shortcode bevatten
             $page_id = (int)$mappings[$orderNum];
-            $postarr = [
-                'ID'           => $page_id,
-                'post_title'   => $title,
-            ];
-            // Laat bestaande content ongemoeid als shortcode al aanwezig is
+            $postarr = ['ID' => $page_id, 'post_title' => $title];
             $existing = get_post($page_id);
             if ($existing && strpos($existing->post_content, '[print_order_status') === false) {
                 $postarr['post_content'] = $existing->post_content . "\n\n" . $content;
             }
             wp_update_post($postarr);
         } else {
-            // Nieuwe pagina met shortcode
             $page_id = wp_insert_post([
                 'post_title'   => $title,
                 'post_name'    => sanitize_title($title),
@@ -248,11 +269,9 @@ class Printcom_Order_Tracker {
                 'post_author'  => get_current_user_id(),
             ]);
             if (is_wp_error($page_id) || !$page_id) return false;
-
             $mappings[$orderNum] = (int)$page_id;
             update_option(self::OPT_MAPPINGS, $mappings, false);
         }
-
         return (int)$page_id;
     }
 
@@ -261,10 +280,7 @@ class Printcom_Order_Tracker {
      * =========================== */
 
     public function render_order_shortcode($atts = []) {
-        $atts = shortcode_atts([
-            'order' => '',
-        ], $atts, 'print_order_status');
-
+        $atts = shortcode_atts(['order' => ''], $atts, 'print_order_status');
         $orderNum = trim($atts['order']);
         if ($orderNum === '') {
             return '<div class="printcom-ot printcom-ot--error">Geen ordernummer opgegeven.</div>';
@@ -283,33 +299,33 @@ class Printcom_Order_Tracker {
             if (is_wp_error($data)) {
                 return '<div class="printcom-ot printcom-ot--error">Kon ordergegevens niet ophalen. ' . esc_html($data->get_error_message()) . '</div>';
             }
-            $ttl_minutes = max(0, (int)($settings['default_cache_ttl'] ?? 30));
-            if ($ttl_minutes > 0) {
-                set_transient($cache_key, $data, $ttl_minutes * MINUTE_IN_SECONDS);
-            }
+            // Dynamische TTL op basis van status
+            set_transient($cache_key, $data, $this->dynamic_cache_ttl_for($data));
         }
 
-        // Bouw output
+        // Markeer recent bekeken (prioriteit)
+        $st = get_option(self::OPT_STATE, []);
+        $e = $st[$orderNum] ?? ['status'=>null,'complete_at'=>null,'last_seen'=>null];
+        $e['last_seen'] = time();
+        $st[$orderNum] = $e;
+        update_option(self::OPT_STATE, $st, false);
+
         $html  = '<div class="printcom-ot">';
         $html .= '<div class="printcom-ot__header"><h2>Status van uw bestelling</h2></div>';
 
-        // Orderstatus (globaal)
         $statusLabel = $this->human_status($data);
         $html .= '<div class="printcom-ot__status"><strong>Status:</strong> ' . esc_html($statusLabel) . '</div>';
 
-        // Eventuele order-brede track & trace? Meestal per shipment.
-        // Toon per product + shipments
         $html .= '<div class="printcom-ot__items"><h3>Bestelde producten</h3>';
 
-        // Custom afbeelding op paginaniveau (optioneel)
         $order_image_html = $this->get_order_page_image_html();
         if ($order_image_html) {
             $html .= '<div class="printcom-ot__order-image">' . $order_image_html . '</div>';
         }
 
-        // Bouw index van verzonden items obv shipments
+        // bepaal verzonden items en tracklinks
         $shipped_items = [];
-        $tracks_by_item = []; // itemNumber => [trackUrl...]
+        $tracks_by_item = [];
         if (!empty($data['shipments']) && is_array($data['shipments'])) {
             foreach ($data['shipments'] as $shipment) {
                 $itemNums = $shipment['orderItemNumbers'] ?? [];
@@ -326,7 +342,6 @@ class Printcom_Order_Tracker {
             }
         }
 
-        // Doorloop items
         $html .= '<ul class="printcom-ot__list">';
         if (!empty($data['items']) && is_array($data['items'])) {
             foreach ($data['items'] as $item) {
@@ -342,8 +357,6 @@ class Printcom_Order_Tracker {
                     : '<span class="printcom-ot__badge printcom-ot__badge--pending">In behandeling</span>';
                 $html .= '</div>';
 
-                // Item-specifieke info (geen prijzen weergeven)
-                // Toon Track & Trace links indien verzonden
                 if ($isShipped) {
                     $urls = $tracks_by_item[$itemNum] ?? [];
                     if (!empty($urls)) {
@@ -373,19 +386,15 @@ class Printcom_Order_Tracker {
     }
 
     private function human_status(array $data) {
-        // Probeer een logische status af te leiden:
-        // Als alle items verzonden zijn => Verzonden, anders In behandeling. Eventueel: Geannuleerd/Onbekend.
         $all = $data['items'] ?? [];
         $ships = $data['shipments'] ?? [];
 
         if (empty($all)) return 'Onbekend';
 
-        // Bepaal welke item nummers er zijn
         $allItems = [];
         foreach ($all as $it) {
             if (!empty($it['orderItemNumber'])) $allItems[$it['orderItemNumber']] = false;
         }
-        // Markeer verzonden
         if (!empty($ships)) {
             foreach ($ships as $s) {
                 foreach (($s['orderItemNumbers'] ?? []) as $inum) {
@@ -396,11 +405,9 @@ class Printcom_Order_Tracker {
         $allShipped = !empty($allItems) && count(array_filter($allItems)) === count($allItems);
         if ($allShipped) return 'Verzonden';
 
-        // Als sommige wel, sommige niet:
         $anyShipped = count(array_filter($allItems)) > 0;
         if ($anyShipped) return 'Deels verzonden';
 
-        // Eventueel veld data['status'] gebruiken als aanwezig
         if (!empty($data['status'])) {
             $s = strtolower($data['status']);
             if ($s === 'cancelled' || $s === 'canceled') return 'Geannuleerd';
@@ -428,7 +435,6 @@ class Printcom_Order_Tracker {
     }
 
     public function metabox_html($post) {
-        // Toon alleen op pagina’s die door ons zijn aangemaakt (met shortcode)
         if (strpos($post->post_content, '[print_order_status') === false) {
             echo '<p>Deze pagina lijkt geen Print.com orderpagina te zijn.</p>';
             return;
@@ -509,7 +515,7 @@ class Printcom_Order_Tracker {
             return wp_get_attachment_image($attachment_id, 'large', false, ['class' => 'printcom-ot__image']);
         }
 
-        // Placeholder (eenvoudig inline SVG)
+        // Placeholder (inline SVG)
         $svg = '<svg class="printcom-ot__image" role="img" aria-label="Afbeelding volgt" xmlns="http://www.w3.org/2000/svg" width="1200" height="630" viewBox="0 0 1200 630"><rect width="100%" height="100%" fill="#f2f2f2"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#999" font-family="Arial,Helvetica,sans-serif" font-size="32">Afbeelding volgt</text></svg>';
         return $svg;
     }
@@ -543,12 +549,10 @@ class Printcom_Order_Tracker {
     }
 
     /* ===========================
-     * API client
+     * API client + state/TTL
      * =========================== */
 
-    private function get_settings() {
-        return get_option(self::OPT_SETTINGS, []);
-    }
+    private function get_settings() { return get_option(self::OPT_SETTINGS, []); }
 
     private function api_get_order($orderNum) {
         $settings = $this->get_settings();
@@ -571,7 +575,7 @@ class Printcom_Order_Tracker {
         $code = wp_remote_retrieve_response_code($res);
         $body = wp_remote_retrieve_body($res);
         if ($code === 401) {
-            // Token wellicht verlopen. Ververs en 1x opnieuw
+            // Token verlopen? Ververs en 1x opnieuw
             delete_transient(self::TRANSIENT_TOKEN);
             $token = $this->get_access_token(true);
             if (is_wp_error($token)) return $token;
@@ -591,36 +595,84 @@ class Printcom_Order_Tracker {
             return new WP_Error('printcom_api_error', 'Ongeldig API-antwoord.');
         }
 
+        // State bijwerken
+        $this->update_order_state($orderNum, $json);
+
         return $json;
     }
 
     private function get_access_token($force_refresh = false) {
         $cached = get_transient(self::TRANSIENT_TOKEN);
-        if ($cached && !$force_refresh) {
-            return $cached;
-        }
+        if ($cached && !$force_refresh) return $cached;
 
         $settings = $this->get_settings();
         $auth_url = $settings['auth_url'] ?? '';
-        $grant    = $settings['grant_type'] ?? 'client_credentials';
         if (empty($auth_url)) {
             return new WP_Error('printcom_auth_missing', 'Auth URL niet ingesteld.');
         }
 
-        $body = ['grant_type' => $grant];
-        $headers = ['Accept' => 'application/json'];
+        // Print.com /login: POST JSON {"credentials":{username,password}} -> JWT
+        $is_print_login = (stripos($auth_url, '/login') !== false);
 
+        if ($is_print_login) {
+            if (empty($settings['username']) || empty($settings['password'])) {
+                return new WP_Error('printcom_auth_missing', 'Username/Password ontbreken.');
+            }
+            $body = wp_json_encode([
+                'credentials' => [
+                    'username' => $settings['username'],
+                    'password' => $settings['password'],
+                ],
+            ]);
+            $args = [
+                'headers' => [
+                    'Accept'       => 'application/json',
+                    'Content-Type' => 'application/json',
+                ],
+                'body'    => $body,
+                'timeout' => 20,
+            ];
+            $res  = wp_remote_post($auth_url, $args);
+            if (is_wp_error($res)) return $res;
+
+            $code = wp_remote_retrieve_response_code($res);
+            $raw  = wp_remote_retrieve_body($res);
+            if ($code < 200 || $code >= 300) {
+                return new WP_Error('printcom_auth_error', 'Auth fout (' . (int)$code . '). Controleer login & URL.');
+            }
+            $json = json_decode($raw, true);
+
+            $token = null;
+            if (is_array($json)) {
+                $token = $json['access_token'] ?? $json['token'] ?? $json['jwt'] ?? null;
+            }
+            if (!$token && is_string($raw) && strlen($raw) > 20 && strpos($raw, '{') === false) {
+                // fallback: respons is mogelijk direct een JWT string
+                $token = trim($raw);
+            }
+            if (!$token) {
+                return new WP_Error('printcom_auth_error', 'Kon JWT niet vinden in login-response.');
+            }
+
+            // Geldig ±168 uur -> 7 dagen; marge -60s
+            $ttl = max(60, (7 * DAY_IN_SECONDS) - 60);
+            set_transient(self::TRANSIENT_TOKEN, $token, $ttl);
+            return $token;
+        }
+
+        // Fallback: generieke OAuth (client_credentials/password met form-encoded)
+        $grant = $settings['grant_type'] ?? 'client_credentials';
+        $body  = ['grant_type' => $grant];
         if ($grant === 'client_credentials') {
             if (empty($settings['client_id']) || empty($settings['client_secret'])) {
                 return new WP_Error('printcom_auth_missing', 'Client ID/Secret ontbreken.');
             }
             $body['client_id']     = $settings['client_id'];
             $body['client_secret'] = $settings['client_secret'];
-        } else {
+        } else { // password grant
             if (empty($settings['username']) || empty($settings['password'])) {
                 return new WP_Error('printcom_auth_missing', 'Username/Password ontbreken.');
             }
-            // Sommige OAuth servers vereisen ook client_id/secret bij password grant. Voeg velden toe als aanwezig.
             if (!empty($settings['client_id']))     $body['client_id'] = $settings['client_id'];
             if (!empty($settings['client_secret'])) $body['client_secret'] = $settings['client_secret'];
             $body['username'] = $settings['username'];
@@ -629,10 +681,9 @@ class Printcom_Order_Tracker {
 
         $args = [
             'body'    => $body,
-            'headers' => $headers,
+            'headers' => ['Accept' => 'application/json'],
             'timeout' => 20,
         ];
-
         $res = wp_remote_post($auth_url, $args);
         if (is_wp_error($res)) return $res;
 
@@ -643,17 +694,148 @@ class Printcom_Order_Tracker {
         }
 
         $json = json_decode($raw, true);
-        if (!is_array($json) || empty($json['access_token'])) {
-            return new WP_Error('printcom_auth_error', 'Kon access_token niet vinden in auth-response.');
+        if (!is_array($json)) {
+            return new WP_Error('printcom_auth_error', 'Ongeldige auth-response.');
         }
 
-        $token = $json['access_token'];
-        $expires = isset($json['expires_in']) ? (int)$json['expires_in'] : (7 * DAY_IN_SECONDS); // fallback 7 dagen
-        // Zet kleine veiligheidsmarge
+        $token   = $json['access_token'] ?? null;
+        $expires = isset($json['expires_in']) ? (int)$json['expires_in'] : (7 * DAY_IN_SECONDS);
+        if (!$token) {
+            return new WP_Error('printcom_auth_error', 'Kon access_token niet vinden in auth-response.');
+        }
         $ttl = max(60, $expires - 60);
         set_transient(self::TRANSIENT_TOKEN, $token, $ttl);
         return $token;
     }
+
+    /* ===========================
+     * State/Dynamic TTL helpers
+     * =========================== */
+
+    private function is_order_complete(array $data): bool {
+        $all = $data['items'] ?? [];
+        $ships = $data['shipments'] ?? [];
+        if (empty($all)) return false;
+
+        $shipped = [];
+        foreach ($all as $it) {
+            if (!empty($it['orderItemNumber'])) $shipped[$it['orderItemNumber']] = false;
+        }
+        foreach ($ships as $s) {
+            foreach (($s['orderItemNumbers'] ?? []) as $inum) {
+                if (isset($shipped[$inum])) $shipped[$inum] = true;
+            }
+        }
+        return !empty($shipped) && count(array_filter($shipped)) === count($shipped);
+    }
+
+    private function update_order_state(string $orderNum, array $data): void {
+        $state = get_option(self::OPT_STATE, []);
+        $now = time();
+        $complete = $this->is_order_complete($data);
+        $status = isset($data['status']) ? strtolower((string)$data['status']) : ($complete ? 'shipped' : 'processing');
+        $entry = $state[$orderNum] ?? ['status'=>null,'complete_at'=>null,'last_seen'=>null];
+        $entry['status'] = $status;
+        if ($complete && empty($entry['complete_at'])) $entry['complete_at'] = $now;
+        if (!$complete) $entry['complete_at'] = null; // terugzetten indien verandering
+        $state[$orderNum] = $entry;
+        update_option(self::OPT_STATE, $state, false);
+    }
+
+    private function dynamic_cache_ttl_for(array $data): int {
+        if ($this->is_order_complete($data)) {
+            return DAY_IN_SECONDS; // COLD
+        }
+        return 5 * MINUTE_IN_SECONDS; // HOT
+    }
+
+    /* ===========================
+     * Cron taken
+     * =========================== */
+
+    public function cron_refresh_token() {
+        delete_transient(self::TRANSIENT_TOKEN);
+        $token = $this->get_access_token(true);
+        if (is_wp_error($token)) {
+            error_log('[Printcom OT] Token verversen mislukt: ' . $token->get_error_message());
+        } else {
+            error_log('[Printcom OT] Token succesvol ververst.');
+        }
+    }
+
+    public function cron_warm_cache() {
+        $state    = get_option(self::OPT_STATE, []);
+        $mappings = get_option(self::OPT_MAPPINGS, []);
+        if (empty($mappings)) return;
+
+        // Parameters
+        $hot_limit    = 50;              // max HOT orders per run
+        $cold_limit   = 20;              // max COLD orders per run
+        $archive_days = 14;              // na 14 dagen complete -> overslaan
+        $now          = time();
+
+        $orders = [];
+        foreach ($mappings as $orderNum => $pid) {
+            $entry = $state[$orderNum] ?? null;
+            $complete_at = $entry['complete_at'] ?? null;
+            $status = $entry['status'] ?? null;
+
+            // ARCHIVE: compleet én ouder dan X dagen -> overslaan
+            if ($complete_at && ($now - (int)$complete_at) > ($archive_days * DAY_IN_SECONDS)) {
+                continue;
+            }
+
+            // Classificeer
+            $isComplete = ($complete_at !== null) || ($status === 'shipped' || $status === 'completed');
+            $orders[] = [
+                'order'     => $orderNum,
+                'type'      => $isComplete ? 'COLD' : 'HOT',
+                'last_seen' => $entry['last_seen'] ?? 0,
+            ];
+        }
+
+        if (empty($orders)) return;
+
+        // Shuffle + sorteer HOT recent-first
+        shuffle($orders);
+        $hot  = array_values(array_filter($orders, fn($o) => $o['type']==='HOT'));
+        $cold = array_values(array_filter($orders, fn($o) => $o['type']==='COLD'));
+
+        usort($hot, function($a,$b){ return ($b['last_seen'] <=> $a['last_seen']); });
+
+        $processed_hot = 0;
+        foreach ($hot as $o) {
+            if ($processed_hot >= $hot_limit) break;
+            $data = $this->api_get_order($o['order']);
+            if (is_wp_error($data)) {
+                error_log('[Printcom OT] HOT warm fout '.$o['order'].': '.$data->get_error_message());
+                continue;
+            }
+            $cache_key = self::TRANSIENT_PREFIX . md5($o['order']);
+            set_transient($cache_key, $data, $this->dynamic_cache_ttl_for($data));
+            $processed_hot++;
+        }
+
+        $processed_cold = 0;
+        foreach ($cold as $o) {
+            if ($processed_cold >= $cold_limit) break;
+            $data = $this->api_get_order($o['order']);
+            if (is_wp_error($data)) {
+                error_log('[Printcom OT] COLD warm fout '.$o['order'].': '.$data->get_error_message());
+                continue;
+            }
+            $cache_key = self::TRANSIENT_PREFIX . md5($o['order']);
+            set_transient($cache_key, $data, $this->dynamic_cache_ttl_for($data));
+            $processed_cold++;
+        }
+
+        error_log('[Printcom OT] Warmed HOT: '.$processed_hot.'; COLD: '.$processed_cold.'.');
+    }
 }
 
+// Hooks activeren/deactiveren
+register_activation_hook(__FILE__, ['Printcom_Order_Tracker', 'activate']);
+register_deactivation_hook(__FILE__, ['Printcom_Order_Tracker', 'deactivate']);
+
+// Start plugin
 new Printcom_Order_Tracker();
