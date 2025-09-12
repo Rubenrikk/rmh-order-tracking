@@ -1,0 +1,17 @@
+# WordPress plugin build ignores
+*.zip
+*.tar.gz
+
+# OS junk files
+.DS_Store
+Thumbs.db
+
+# IDE/project files
+.vscode/
+.idea/
+*.sublime-project
+*.sublime-workspace
+
+# Node & Composer
+node_modules/
+vendor/
