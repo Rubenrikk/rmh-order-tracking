@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     1.5.1
+ * Version:     1.5.2
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -1051,6 +1051,10 @@ add_action('admin_post_printcom_ot_test_order', function(){
     if (is_wp_error($token)) {
         $msg = '❌ Tokenfout: ' . esc_html($token->get_error_message());
     } else {
+        // Laat token-shape zien (veilig: alleen eerste 16 tekens)
+        $prefix = substr($token, 0, 16);
+        $len    = strlen($token);
+
         $s = get_option(Printcom_Order_Tracker::OPT_SETTINGS, []);
         $base = rtrim($s['api_base_url'] ?? 'https://api.print.com', '/');
         $url  = $base.'/orders/'.rawurlencode($order);
@@ -1068,10 +1072,12 @@ add_action('admin_post_printcom_ot_test_order', function(){
         } else {
             $code = wp_remote_retrieve_response_code($res);
             $raw  = wp_remote_retrieve_body($res);
+            $body_preview = $raw ? mb_substr($raw, 0, 260) : '';
+            $msg = '🔎 Token: len='.$len.', starts="'.esc_html($prefix).'" | ';
             if ($code >= 200 && $code < 300) {
-                $msg = '✅ Order OK ('.$code.'). Body lengte: '.strlen($raw).'.';
+                $msg .= '✅ Order OK ('.$code.'). Body ~'.strlen($raw).' bytes.';
             } else {
-                $msg = '❌ Order fout ('.$code.'). '.(!empty($raw)?'Body: '.sanitize_text_field($raw):'Geen body.');
+                $msg .= '❌ Order fout ('.$code.'). '.($body_preview ? 'Body: '.sanitize_text_field($body_preview) : 'Geen body.');
             }
         }
     }
