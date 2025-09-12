@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     1.4.2
+ * Version:     1.5.0
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -170,11 +170,57 @@ class Printcom_Order_Tracker {
         return $out ? implode(' | ',$out) : 'Kan DNS niet ophalen (serverblok/disabled).';
     }
 
+    private function remove_order_mapping(string $orderNum, bool $also_delete_page = false): bool {
+        $mappings = get_option(self::OPT_MAPPINGS, []);
+        if (!isset($mappings[$orderNum])) return false;
+
+        $page_id = (int) $mappings[$orderNum];
+
+        // Optioneel: ook de pagina zelf verwijderen
+        if ($also_delete_page && $page_id && get_post_status($page_id)) {
+            wp_delete_post($page_id, true);
+        }
+
+        // Mapping verwijderen
+        unset($mappings[$orderNum]);
+        update_option(self::OPT_MAPPINGS, $mappings, false);
+
+        // Cache opruimen
+        delete_transient(self::TRANSIENT_PREFIX . md5($orderNum));
+
+        // State opruimen
+        $state = get_option(self::OPT_STATE, []);
+        if (isset($state[$orderNum])) {
+            unset($state[$orderNum]);
+            update_option(self::OPT_STATE, $state, false);
+        }
+        return true;
+    }
+
     public function orders_page() {
         if (!current_user_can('manage_options')) return;
 
+        // Auto-opschonen: verwijder mappings waarvan de pagina niet meer bestaat
+        $mappings = get_option(self::OPT_MAPPINGS, []);
+        $changed = false;
+        foreach ($mappings as $order => $pid) {
+            if (!$pid || !get_post_status((int)$pid)) {
+                unset($mappings[$order]);
+                // Ruim ook cache/state op
+                delete_transient(self::TRANSIENT_PREFIX . md5($order));
+                $state = get_option(self::OPT_STATE, []);
+                if (isset($state[$order])) {
+                    unset($state[$order]);
+                    update_option(self::OPT_STATE, $state, false);
+                }
+                $changed = true;
+            }
+        }
+        if ($changed) update_option(self::OPT_MAPPINGS, $mappings, false);
+
         $message = '';
-        if (!empty($_POST['printcom_ot_new_order']) && check_admin_referer('printcom_ot_new_order_action','printcom_ot_nonce')) {
+        // Aanmaken/bijwerken via formulier
+        if (!empty($_POST['printcom_ot_new_order']) && check_admin_referer('printcom_ot_new_order_action', 'printcom_ot_nonce')) {
             $orderNum = sanitize_text_field($_POST['printcom_ot_new_order']);
             if ($orderNum !== '') {
                 $page_id = $this->create_or_update_page_for_order($orderNum);
@@ -187,13 +233,19 @@ class Printcom_Order_Tracker {
             }
         }
 
-        $mappings = get_option(self::OPT_MAPPINGS, []);
+        // Verwijderd-notice uit actie-handler tonen
+        if (!empty($_GET['printcom_deleted_order'])) {
+            $od = sanitize_text_field(wp_unslash($_GET['printcom_deleted_order']));
+            $message = 'Order <strong>' . esc_html($od) . '</strong> is uit de lijst verwijderd.';
+        }
         ?>
         <div class="wrap">
             <h1>Print.com Orders</h1>
-            <?php if ($message): ?><div class="notice notice-success"><p><?php echo wp_kses_post($message); ?></p></div><?php endif; ?>
+            <?php if ($message): ?>
+                <div class="notice notice-success"><p><?php echo wp_kses_post($message); ?></p></div>
+            <?php endif; ?>
             <form method="post">
-                <?php wp_nonce_field('printcom_ot_new_order_action','printcom_ot_nonce'); ?>
+                <?php wp_nonce_field('printcom_ot_new_order_action', 'printcom_ot_nonce'); ?>
                 <table class="form-table" role="presentation">
                     <tr>
                         <th scope="row"><label for="printcom_ot_new_order">Ordernummer</label></th>
@@ -209,13 +261,21 @@ class Printcom_Order_Tracker {
             <h2>Bestaande orderpagina’s</h2>
             <?php if (!empty($mappings)): ?>
                 <table class="widefat striped">
-                    <thead><tr><th>Ordernummer</th><th>Pagina</th><th>Link</th></tr></thead>
+                    <thead><tr><th>Ordernummer</th><th>Pagina</th><th>Link</th><th>Acties</th></tr></thead>
                     <tbody>
-                    <?php foreach ($mappings as $order => $pid): $link = get_permalink($pid); ?>
+                    <?php foreach ($mappings as $order => $pid):
+                        $link = get_permalink($pid);
+                        $title = get_the_title($pid);
+                        $delete_url = wp_nonce_url(
+                            admin_url('admin-post.php?action=printcom_ot_delete_order&order=' . rawurlencode($order)),
+                            'printcom_ot_delete_order_'.$order
+                        );
+                        ?>
                         <tr>
                             <td><?php echo esc_html($order); ?></td>
-                            <td><?php echo esc_html(get_the_title($pid)); ?> (ID: <?php echo (int)$pid; ?>)</td>
+                            <td><?php echo esc_html($title); ?> (ID: <?php echo (int)$pid; ?>)</td>
                             <td><a href="<?php echo esc_url($link); ?>" target="_blank" rel="noopener"><?php echo esc_html($link); ?></a></td>
+                            <td><a class="button button-link-delete" href="<?php echo esc_url($delete_url); ?>" onclick="return confirm('Verwijder deze order uit de lijst? De pagina zelf blijft ongewijzigd.');">Verwijder uit lijst</a></td>
                         </tr>
                     <?php endforeach; ?>
                     </tbody>
@@ -624,6 +684,31 @@ add_action('admin_post_printcom_ot_show_server_ip', function(){
     $ip  = is_wp_error($res) ? $res->get_error_message() : trim(wp_remote_retrieve_body($res));
     $dest = wp_get_referer() ?: admin_url('options-general.php?page=printcom-orders-settings');
     wp_safe_redirect(add_query_arg('printcom_server_ip', rawurlencode($ip), $dest));
+    exit;
+});
+
+add_action('admin_post_printcom_ot_delete_order', function(){
+    if (!current_user_can('manage_options')) wp_die('Unauthorized');
+
+    $order = isset($_GET['order']) ? sanitize_text_field(wp_unslash($_GET['order'])) : '';
+    if ($order === '') wp_die('Order ontbreekt.');
+
+    // Nonce check op basis van order
+    $nonce_key = 'printcom_ot_delete_order_'.$order;
+    if (empty($_GET['_wpnonce']) || !wp_verify_nonce(sanitize_text_field(wp_unslash($_GET['_wpnonce'])), $nonce_key)) {
+        wp_die('Nonce invalid');
+    }
+
+    // Verwijder mapping + cache + state
+    $plugin = new Printcom_Order_Tracker();
+    // zet evt. tweede param op true als je óók de pagina wil verwijderen:
+    $plugin_removed = (new ReflectionClass($plugin))->getMethod('remove_order_mapping')->invoke($plugin, $order, false);
+
+    $dest = admin_url('admin.php?page=printcom-orders');
+    if ($plugin_removed) {
+        $dest = add_query_arg('printcom_deleted_order', rawurlencode($order), $dest);
+    }
+    wp_safe_redirect($dest);
     exit;
 });
 
