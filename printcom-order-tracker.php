@@ -297,7 +297,7 @@ class Printcom_Order_Tracker {
         $html .=   '<p><strong>Status:</strong> '.esc_html($nl_status).'</p>';
         if ($overall_delivery) {
             // Let op: $overall_delivery is alleen de datumrange (bijv. "12-09 of 16-09")
-            $html .= '<p><strong>Verwachte leverdatum (gehele bestelling):</strong> '.esc_html($overall_delivery).'</p>';
+            $html .= '<p><strong>Verwachte leverdatum tussen:</strong> '.esc_html($overall_delivery).'</p>';
         } else {
             $html .= '<p><em>Verwachte leverdatum nog niet beschikbaar.</em></p>';
         }
