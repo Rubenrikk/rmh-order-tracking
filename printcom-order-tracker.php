@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     1.6.5
+ * Version:     1.7.0
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -177,20 +177,46 @@ class Printcom_Order_Tracker {
         <?php
     }
 
-    private function create_or_update_page_for_order($orderNum){
-        $map=get_option(self::OPT_MAPPINGS,[]);
+    private function create_or_update_page_for_order($orderNum) {
+        $mappings=get_option(self::OPT_MAPPINGS,[]);
         $title='Bestelling '.$orderNum;
         $shortcode=sprintf('[print_order_status order="%s"]',esc_attr($orderNum));
-        if (isset($map[$orderNum]) && get_post_status((int)$map[$orderNum])) {
-            $page_id=(int)$map[$orderNum];
-            $post=['ID'=>$page_id,'post_title'=>$title];
+
+        // probeer Divi fullwidth template te detecteren
+        $divi_full_tpl = locate_template('et_full_width_page.php'); // Divi
+        $blank_tpl     = locate_template('page-template-blank.php'); // soms Divi blank
+
+        if (isset($mappings[$orderNum]) && get_post_status((int)$mappings[$orderNum])) {
+            $page_id=(int)$mappings[$orderNum];
+            $update=['ID'=>$page_id,'post_title'=>$title];
             $cur=get_post($page_id);
-            if ($cur && strpos($cur->post_content,'[print_order_status')===false) $post['post_content']=$cur->post_content."\n\n".$shortcode;
-            wp_update_post($post);
+            if ($cur && strpos($cur->post_content,'[print_order_status')===false) {
+                $update['post_content']=$cur->post_content."\n\n".$shortcode;
+            }
+            wp_update_post($update);
+
+            // (optioneel) zet template als nog niet gezet
+            if ($divi_full_tpl || $blank_tpl) {
+                $tpl = $divi_full_tpl ? 'et_full_width_page.php' : 'page-template-blank.php';
+                if (get_post_meta($page_id, '_wp_page_template', true) !== $tpl) {
+                    update_post_meta($page_id, '_wp_page_template', $tpl);
+                }
+            }
         } else {
-            $page_id=wp_insert_post(['post_title'=>$title,'post_name'=>sanitize_title($title),'post_content'=>$shortcode,'post_status'=>'publish','post_type'=>'page','post_author'=>get_current_user_id()]);
-            if(is_wp_error($page_id) || !$page_id) return false;
-            $map[$orderNum]=(int)$page_id; update_option(self::OPT_MAPPINGS,$map,false);
+            $page_id = wp_insert_post([
+                'post_title'=>$title,
+                'post_name'=>sanitize_title($title),
+                'post_content'=>$shortcode,
+                'post_status'=>'publish',
+                'post_type'=>'page',
+                'post_author'=>get_current_user_id()
+            ]);
+            if (is_wp_error($page_id) || !$page_id) return false;
+            $mappings[$orderNum]=(int)$page_id; update_option(self::OPT_MAPPINGS,$mappings,false);
+
+            if ($divi_full_tpl || $blank_tpl) {
+                update_post_meta($page_id, '_wp_page_template', $divi_full_tpl ? 'et_full_width_page.php' : 'page-template-blank.php');
+            }
         }
         return (int)$page_id;
     }
@@ -218,6 +244,18 @@ class Printcom_Order_Tracker {
             if(is_wp_error($data)) return '<div class="printcom-ot printcom-ot--error">Kon ordergegevens niet ophalen. '.esc_html($data->get_error_message()).'</div>';
             set_transient($cache_key,$data,$this->dynamic_cache_ttl_for($data));
         }
+        
+        $overall_delivery = $this->render_delivery_window_range($data['shipments'] ?? []);
+        if (!$overall_delivery) {
+            // als order-level leeg is, probeer any item-level shipments mee te nemen
+            $all_sh = [];
+            foreach (($data['items'] ?? []) as $it) {
+                if (!empty($it['shipments'])) $all_sh = array_merge($all_sh, $it['shipments']);
+            }
+            if ($all_sh) $overall_delivery = $this->render_delivery_window_range($all_sh);
+        }
+        $ship_addr = $this->extract_primary_shipping_address($data);
+    
 
         // prioriteit voor warming
         $st=get_option(self::OPT_STATE,[]); $e=$st[$orderNum]??['status'=>null,'complete_at'=>null,'last_seen'=>null]; $e['last_seen']=time(); $st[$orderNum]=$e; update_option(self::OPT_STATE,$st,false);
@@ -251,8 +289,43 @@ class Printcom_Order_Tracker {
         $statusLabel=$this->human_status($data);
 
         $html  = '<div class="printcom-ot">';
-        $html .= '<div class="printcom-ot__header"><h2>Status van uw bestelling</h2></div>';
-        $html .= '<div class="printcom-ot__status"><strong>Status:</strong> '.esc_html($statusLabel).'</div>';
+
+        $html .= '<div class="printcom-ot__header">';
+        $html .=   '<h2>Bestelling '.esc_html($orderNum).'</h2>';
+        $html .=   '<div>'.$this->status_badge($data['status'] ?? 'Onbekend').'</div>';
+        $html .= '</div>';
+
+        $html .= '<div class="printcom-ot__row">';
+
+        // Linkerkolom: leverdatum + status
+        $html .= '<div class="printcom-ot__panel">';
+        $html .=   '<h3>Status & levering</h3>';
+        $html .=   '<p><strong>Status:</strong> '.esc_html($this->human_status($data)).'</p>';
+        if ($overall_delivery) {
+            $html .= '<p><strong>'.$overall_delivery.'</strong></p>';
+        } else {
+            $html .= '<p><em>Verwachte leverdatum nog niet beschikbaar.</em></p>';
+        }
+        $html .= '</div>';
+
+        // Rechterkolom: verzendadres
+                $html .= '<div class="printcom-ot__panel printcom-ot__addr">';
+        $html .=   '<h3>Verzendadres</h3>';
+        if ($ship_addr) {
+            $fn = trim(($ship_addr['firstName'] ?? '').' '.($ship_addr['lastName'] ?? ''));
+            if ($fn) $html .= '<p>'.esc_html($fn).'</p>';
+            if (!empty($ship_addr['companyName'])) $html .= '<p>'.esc_html($ship_addr['companyName']).'</p>';
+            $street = trim(($ship_addr['fullstreet'] ?? '').' '.($ship_addr['houseNumber'] ?? ''));
+            if ($street) $html .= '<p>'.esc_html($street).'</p>';
+            $city = trim(($ship_addr['postcode'] ?? '').' '.($ship_addr['city'] ?? ''));
+            if ($city) $html .= '<p>'.esc_html($city).'</p>';
+            if (!empty($ship_addr['country'])) $html .= '<p>'.esc_html($ship_addr['country']).'</p>';
+        } else {
+            $html .= '<p><em>Nog geen adresinformatie beschikbaar.</em></p>';
+        }
+        $html .= '</div>';
+
+        $html .= '</div>'; // row
 
         $items = $data['items'] ?? [];
         $shipments = $data['shipments'] ?? [];
@@ -290,8 +363,22 @@ class Printcom_Order_Tracker {
                 if (!$img_html) $img_html = $this->placeholder_svg();
 
                 // Track & Trace
-                $links=[]; foreach(($tracks_by_item[$inum]??[]) as $u) $links[]='<a href="'.esc_url($u).'" target="_blank" rel="nofollow noopener">Volg zending</a>';
-                $tracks_html = $links ? implode(' &middot; ',$links) : '<em>Track &amp; Trace volgt zodra beschikbaar.</em>';
+                $btn_html = '<a class="btn btn--track btn--sm" href="#" aria-disabled="true" onclick="return false;">Track &amp; Trace niet beschikbaar</a>';
+                if (!empty($tracks_by_item[$inum])) {
+                    // neem de eerste link als primaire T&T
+                    $first = $tracks_by_item[$inum][0];
+                    // probeer carrier te herkennen uit order-level shipments (methode)
+                    $method = '';
+                    foreach (($data['shipments'] ?? []) as $s) {
+                        if (!empty($s['orderItemNumbers']) && in_array($inum, $s['orderItemNumbers'], true)) {
+                            $method = (string)($s['method'] ?? '');
+                            break;
+                        }
+                    }
+                    $c = $this->detect_carrier_from_track((string)$first, $method);
+                    $btn_html = '<a class="btn btn--track btn--sm" href="'.esc_url($first).'" target="_blank" rel="nofollow noopener">Open Track &amp; Trace</a>'.
+                                ' <span class="carrier-chip carrier-'.$c['slug'].'"><span class="dot"></span>'.esc_html($c['name']).'</span>';
+                }
 
                 // Opties: compact + met labels waar mogelijk
                 $options_html = $this->render_options_compact($it['options'] ?? [], $it['productTranslation'] ?? []);
@@ -299,10 +386,14 @@ class Printcom_Order_Tracker {
                 $html .= '<div class="printcom-ot__card">';
                 $html .=   '<div class="printcom-ot__card-img">'.$img_html.'</div>';
                 $html .=   '<div class="printcom-ot__card-body">';
-                $html .=     '<div class="printcom-ot__card-title">'.esc_html($title).($qty? ' <span class="printcom-ot__muted">×'.(int)$qty.'</span>' : '').'</div>';
+                $it_status = isset($it['status']) ? (string)$it['status'] : '';
+                $html .= '<div class="printcom-ot__card-title">'.esc_html($title).($qty? ' <span class="printcom-ot__muted">×'.(int)$qty.'</span>' : '');
+                if ($it_status !== '') $html .= ' &nbsp; '.$this->status_badge($it_status);
+                $html .= '</div>';                
                 if($sku) $html .= '<div class="printcom-ot__meta"><strong>SKU:</strong> '.esc_html($sku).'</div>';
                 if($options_html) $html .= '<div class="printcom-ot__opts">'.$options_html.'</div>';
-                $html .=     '<div class="printcom-ot__tracks"><strong>Track &amp; Trace:</strong> '.$tracks_html.'</div>';
+                $html .= '<div class="printcom-ot__tracks">'.$btn_html.'</div>';                
+                
                 if($inum) $html .= '<div class="printcom-ot__itemnr"><span class="printcom-ot__muted">Itemnummer:</span> '.esc_html($inum).'</div>';
                 $html .=   '</div>';
                 $html .= '</div>';
@@ -551,6 +642,70 @@ class Printcom_Order_Tracker {
         return 0;
     }
 
+    private function detect_carrier_from_track(string $url, string $method = ''): array {
+        $u = strtolower($url);
+        $m = strtolower($method);
+        if (strpos($u,'postnl') !== false || strpos($m,'pna_') === 0) return ['name'=>'PostNL','slug'=>'postnl'];
+        if (strpos($u,'dhl') !== false || strpos($m,'dh') === 0)     return ['name'=>'DHL','slug'=>'dhl'];
+        if (strpos($u,'dpd') !== false)                              return ['name'=>'DPD','slug'=>'dpd'];
+        if (strpos($u,'gls') !== false)                              return ['name'=>'GLS','slug'=>'gls'];
+        if (strpos($u,'ups') !== false)                              return ['name'=>'UPS','slug'=>'ups'];
+        return ['name'=>'Vervoerder','slug'=>'carrier'];
+    }
+
+    private function fmt_date_ymdh(string $s): ?DateTime {
+        // accepteert "2025-09-12 17:00:00" of ISO "2025-09-12T17:00:00.000Z"
+        try {
+            if (strpos($s,'T') !== false) return new DateTime($s);
+            return DateTime::createFromFormat('Y-m-d H:i:s', $s) ?: new DateTime($s);
+        } catch (\Throwable $e) { return null; }
+    }
+
+    private function render_delivery_window_range(array $shipments): ?string {
+        // Berekent globale window uit array shipments (order-level of item-level)
+        $start=null; $end=null;
+        foreach ($shipments as $s) {
+            $d1 = !empty($s['deliveryDate']) ? $this->fmt_date_ymdh((string)$s['deliveryDate']) : null;
+            $d2 = !empty($s['latestDeliveryDate']) ? $this->fmt_date_ymdh((string)$s['latestDeliveryDate']) : null;
+            if ($d1 && (!$start || $d1 < $start)) $start = $d1;
+            if ($d2 && (!$end   || $d2 > $end))   $end   = $d2;
+            if ($d1 && !$d2) { if (!$end || $d1 > $end) $end = $d1; }
+        }
+        if (!$start && !$end) return null;
+
+        $fmt = function(DateTime $dt){ return $dt->format('d-m'); };
+        if ($start && $end && $start->format('d-m') !== $end->format('d-m')) {
+            return 'Verwachte leverdatum: '.$fmt($start).' of '.$fmt($end);
+        }
+        $one = $start ?: $end;
+        return 'Verwachte leverdatum: '.$fmt($one);
+    }
+
+    private function extract_primary_shipping_address(array $order): ?array {
+        // Neemt adres uit order-level shipments, anders uit eerste item->shipments
+        $ships = $order['shipments'] ?? [];
+        foreach ($ships as $s) {
+            if (!empty($s['address'])) return $s['address'];
+        }
+        $items = $order['items'] ?? [];
+        foreach ($items as $it) {
+            foreach (($it['shipments'] ?? []) as $s) {
+                if (!empty($s['address'])) return $s['address'];
+            }
+        }
+        return null;
+    }
+
+    private function status_badge(string $status): string {
+        $s = strtolower($status);
+        $cls = 'badge--neutral';
+        if (in_array($s,['shipped','intransit'])) $cls='badge--info';
+        if (in_array($s,['delivered','finished','printed'])) $cls='badge--success';
+        if (in_array($s,['acceptedbysupplier','orderreceived','readyforproduction','processing'])) $cls='badge--warn';
+        if (in_array($s,['cancelled','canceled','refusedbysupplier','error'])) $cls='badge--danger';
+        return '<span class="badge '.$cls.'">'.esc_html($status).'</span>';
+    }
+
     /* ===== Styles ===== */
 
     public function enqueue_styles() {
@@ -572,6 +727,37 @@ class Printcom_Order_Tracker {
         .printcom-ot__chip{background:#f5f5f5;border:1px solid #eee;border-radius:999px;padding:2px 8px;font-size:.8rem}
         .printcom-ot__tracks{margin-top:8px}
         .printcom-ot--error{border:1px solid #f5c2c7;background:#f8d7da;padding:12px;border-radius:8px;color:#842029}
+        .sidebar, #sidebar, .et_right_sidebar #sidebar, .et_left_sidebar #sidebar { display:none !important; }
+        #left-area, .et_right_sidebar #left-area, .et_pb_row { width:100% !important; max-width:100% !important; }
+        ';
+        $css .= '
+        .printcom-ot__header{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+        .printcom-ot__header .badge{margin-left:auto}
+        .badge{display:inline-block;padding:4px 10px;border-radius:999px;font-size:.85rem;font-weight:600}
+        .badge--success{background:#E6F4EA;color:#1E7F41}
+        .badge--info{background:#E6F2FB;color:#0B63C4}
+        .badge--warn{background:#FFF4E5;color:#B76E00}
+        .badge--danger{background:#FDEAEA;color:#B42318}
+        .badge--neutral{background:#F1F1F1;color:#555}
+
+        .printcom-ot__row{display:grid;grid-template-columns:1.2fr .8fr;gap:18px;margin:10px 0 22px}
+        @media(max-width:900px){ .printcom-ot__row{grid-template-columns:1fr} }
+
+        .printcom-ot__panel{border:1px solid #eee;border-radius:12px;padding:14px;background:#fff}
+        .printcom-ot__panel h3{margin-top:0}
+        .printcom-ot__addr p{margin:.2rem 0}
+
+        .btn{display:inline-block;padding:10px 14px;border-radius:10px;text-decoration:none;border:1px solid #ddd}
+        .btn--track{background:#0B63C4;color:#fff;border-color:#0B63C4}
+        .btn--track[aria-disabled="true"]{background:#cbd5e1;border-color:#cbd5e1;color:#fff;cursor:not-allowed}
+        .btn--sm{padding:8px 12px;font-size:.9rem}
+        .carrier-chip{display:inline-flex;align-items:center;gap:8px;padding:4px 8px;border-radius:999px;background:#f5f5f5;border:1px solid #eee;font-size:.85rem}
+        .carrier-chip .dot{width:8px;height:8px;border-radius:50%}
+        .carrier-postnl .dot{background:#ff6600}
+        .carrier-dhl .dot{background:#ffcc00}
+        .carrier-dpd .dot{background:#cc0000}
+        .carrier-ups .dot{background:#623a18}
+        .carrier-gls .dot{background:#003399}
         ';
         wp_register_style('printcom-ot-style', false); wp_enqueue_style('printcom-ot-style'); wp_add_inline_style('printcom-ot-style',$css);
     }
