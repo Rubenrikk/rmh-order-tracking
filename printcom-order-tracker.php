@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     1.6.4
+ * Version:     1.6.5
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -222,19 +222,30 @@ class Printcom_Order_Tracker {
         // prioriteit voor warming
         $st=get_option(self::OPT_STATE,[]); $e=$st[$orderNum]??['status'=>null,'complete_at'=>null,'last_seen'=>null]; $e['last_seen']=time(); $st[$orderNum]=$e; update_option(self::OPT_STATE,$st,false);
 
-        // Per-item custom images (admin-added) – haal ze op via de gemapte pagina voor dit order
+        // Per-item custom images (admin) — merge van gemapte pagina + huidige pagina (fallback)
         $item_imgs = [];
         $page_id = 0;
         $mappings = get_option(self::OPT_MAPPINGS, []);
         if (!empty($mappings[$orderNum])) {
             $page_id = (int) $mappings[$orderNum];
-        } elseif (get_the_ID()) {
-            // fallback: current page id als we niet in de mapping zitten (bijv. handmatig geplaatste shortcode)
-            $page_id = (int) get_the_ID();
         }
         if ($page_id) {
-            $item_imgs = get_post_meta($page_id, self::META_ITEM_IMGS, true);
-            if (!is_array($item_imgs)) $item_imgs = [];
+            $map_main = get_post_meta($page_id, self::META_ITEM_IMGS, true);
+            if (is_array($map_main)) $item_imgs = $map_main;
+        }
+        if (get_the_ID()) {
+            $map_here = get_post_meta((int) get_the_ID(), self::META_ITEM_IMGS, true);
+            if (is_array($map_here)) $item_imgs = array_merge($item_imgs, $map_here);
+        }
+        // normaliseer keys (trim/strip quotes)
+        if ($item_imgs) {
+            $norm = [];
+            foreach ($item_imgs as $k => $v) {
+                $kk = is_string($k) ? trim($k) : (string)$k;
+                if ((substr($kk,0,1)==='"' && substr($kk,-1)==='"')||(substr($kk,0,1)==="'" && substr($kk,-1)==="'")) $kk = substr($kk,1,-1);
+                $norm[$kk] = (int)$v;
+            }
+            $item_imgs = $norm;
         }
 
         $statusLabel=$this->human_status($data);
@@ -268,10 +279,15 @@ class Printcom_Order_Tracker {
                 // Mooie titel: neem productTranslation.titleSingle/Plural, anders fallback op 'name'
                 $title = $this->pretty_product_title($it);
 
-                // Productfoto
-                $img_html='';
-                if($inum && !empty($item_imgs[$inum])) $img_html = wp_get_attachment_image((int)$item_imgs[$inum],'large',false,['class'=>'printcom-ot__image']);
-                if(!$img_html) $img_html = $this->placeholder_svg();
+                // Productfoto (met robuuste key-resolutie)
+                $img_html = '';
+                if ($inum) {
+                    $att_id = $this->resolve_item_image_id($inum, $item_imgs);
+                    if ($att_id > 0) {
+                        $img_html = wp_get_attachment_image($att_id, 'large', false, ['class'=>'printcom-ot__image']);
+                    }
+                }
+                if (!$img_html) $img_html = $this->placeholder_svg();
 
                 // Track & Trace
                 $links=[]; foreach(($tracks_by_item[$inum]??[]) as $u) $links[]='<a href="'.esc_url($u).'" target="_blank" rel="nofollow noopener">Volg zending</a>';
@@ -505,6 +521,34 @@ class Printcom_Order_Tracker {
 
     private function placeholder_svg(): string {
         return '<svg class="printcom-ot__image" role="img" aria-label="Afbeelding volgt" xmlns="http://www.w3.org/2000/svg" width="600" height="338" viewBox="0 0 600 338"><rect width="100%" height="100%" fill="#f2f2f2"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#999" font-family="Arial,Helvetica,sans-serif" font-size="18">Afbeelding volgt</text></svg>';
+    }
+
+    private function resolve_item_image_id(string $orderItemNumber, array $map): int {
+        // 1) exact
+        if (isset($map[$orderItemNumber]) && (int)$map[$orderItemNumber] > 0) {
+            return (int)$map[$orderItemNumber];
+        }
+        // 2) exact maar getrimd / zonder quotes
+        $k = trim($orderItemNumber);
+        if ((substr($k,0,1)==='"' && substr($k,-1)==='"')||(substr($k,0,1)==="'" && substr($k,-1)==="'")) $k = substr($k,1,-1);
+        if (isset($map[$k]) && (int)$map[$k] > 0) {
+            return (int)$map[$k];
+        }
+        // 3) suffix-match: als beheerder alleen "-2" of "2" heeft ingevuld
+        if (preg_match('/-(\d+)$/', $orderItemNumber, $m)) {
+            $suffix = '-'.$m[1];
+            foreach ($map as $key => $id) {
+                if (!is_string($key)) continue;
+                $kk = trim($key);
+                if (substr($kk, -strlen($suffix)) === $suffix && (int)$id > 0) {
+                    return (int)$id;
+                }
+                    if ($kk === $m[1] && (int)$id > 0) {
+                    return (int)$id;
+                }
+            }
+        }
+        return 0;
     }
 
     /* ===== Styles ===== */
