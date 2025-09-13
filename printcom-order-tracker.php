@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     1.8.2
+ * Version:     1.8.3
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -882,28 +882,22 @@ class Printcom_Order_Tracker {
     /* ===== Styles ===== */
 
     public function enqueue_styles() {
-        $css='
-        .printcom-ot{border:1px solid #eee;padding:24px;border-radius:12px}
-        .printcom-ot__header h2{margin:0 0 8px;font-size:1.5rem}
-        .printcom-ot__status{margin:8px 0 20px}
-        .printcom-ot__items h3{margin:10px 0}
-        .printcom-ot__grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(260px,1fr));gap:16px}
-        .printcom-ot__card{border:1px solid #f0f0f0;border-radius:10px;overflow:hidden;display:flex;flex-direction:column;background:#fff}
-        .printcom-ot__card-img{background:#fafafa}
-        .printcom-ot__image{width:100%;height:auto;display:block}
-        .printcom-ot__card-body{padding:12px}
-        .printcom-ot__card-title{font-weight:700;margin-bottom:6px}
-        .printcom-ot__muted{color:#777}
-        .printcom-ot__meta{font-size:.9rem;margin-bottom:6px}
-        .printcom-ot__opts{margin:8px 0}
-        .printcom-ot__chips{display:flex;flex-wrap:wrap;gap:6px}
-        .printcom-ot__chip{background:#f5f5f5;border:1px solid #eee;border-radius:999px;padding:2px 8px;font-size:.8rem}
-        .printcom-ot__tracks{margin-top:8px}
-        .printcom-ot--error{border:1px solid #f5c2c7;background:#f8d7da;padding:12px;border-radius:8px;color:#842029}
-        ';
-        $css .= '
+        $css = '
+        /* ====== BASIS ====== */
         .printcom-ot{border:0;padding:0}
-        .printcom-ot__item{border:1px solid #eee;border-radius:16px;background:#fafafa;padding:18px;margin:18px 0}
+        .printcom-ot--error{border:1px solid #f5c2c7;background:#f8d7da;padding:12px;border-radius:8px;color:#842029}
+        .printcom-ot__items h3{margin:10px 0}
+
+        /* Zorg dat item-kaarten ONDER ELKAAR staan (override oude grid) */
+        .printcom-ot__grid{display:block !important}
+        .printcom-ot__items::after{content:"";display:block;clear:both}
+
+        /* Afbeelding, subtiele tekst */
+        .printcom-ot__image{width:100%;height:auto;display:block}
+        .printcom-ot__muted{color:#777}
+
+        /* ====== NIEUWE ITEM LAYOUT ====== */
+        .printcom-ot__item{display:block;border:1px solid #eee;border-radius:16px;background:#fafafa;padding:18px;margin:18px 0}
         .printcom-ot__item-grid{display:grid;grid-template-columns:300px 1fr 400px;gap:20px;align-items:start}
         @media(max-width:1200px){ .printcom-ot__item-grid{grid-template-columns:250px 1fr} }
         @media(max-width:900px){ .printcom-ot__item-grid{grid-template-columns:1fr} }
@@ -927,11 +921,15 @@ class Printcom_Order_Tracker {
         .printcom-ot__dtsmall{color:#666;margin:.1rem 0}
         .printcom-ot__carrier{color:#444;font-weight:600}
 
+        /* Knoppen */
         .btn{display:inline-block;padding:12px 16px;border-radius:12px;text-decoration:none;border:1px solid #ddd}
         .btn--track{background:#0B63C4;color:#fff;border-color:#0B63C4}
         .btn--track[aria-disabled="true"]{background:#cbd5e1;border-color:#cbd5e1;color:#fff;cursor:not-allowed}
         ';
-        wp_register_style('printcom-ot-style', false); wp_enqueue_style('printcom-ot-style'); wp_add_inline_style('printcom-ot-style',$css);
+
+        wp_register_style('printcom-ot-style', false);
+        wp_enqueue_style('printcom-ot-style');
+        wp_add_inline_style('printcom-ot-style', $css);
     }
 
     /* ===== HTTP helpers ===== */
