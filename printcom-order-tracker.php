@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     1.7.0
+ * Version:     1.7.1
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -247,7 +247,6 @@ class Printcom_Order_Tracker {
         
         $overall_delivery = $this->render_delivery_window_range($data['shipments'] ?? []);
         if (!$overall_delivery) {
-            // als order-level leeg is, probeer any item-level shipments mee te nemen
             $all_sh = [];
             foreach (($data['items'] ?? []) as $it) {
                 if (!empty($it['shipments'])) $all_sh = array_merge($all_sh, $it['shipments']);
@@ -255,6 +254,7 @@ class Printcom_Order_Tracker {
             if ($all_sh) $overall_delivery = $this->render_delivery_window_range($all_sh);
         }
         $ship_addr = $this->extract_primary_shipping_address($data);
+        $nl_status = $this->human_status($data); // geeft NL: "Deels verzonden", "Verzonden", etc.
     
 
         // prioriteit voor warming
@@ -289,27 +289,23 @@ class Printcom_Order_Tracker {
         $statusLabel=$this->human_status($data);
 
         $html  = '<div class="printcom-ot">';
-
-        $html .= '<div class="printcom-ot__header">';
-        $html .=   '<h2>Bestelling '.esc_html($orderNum).'</h2>';
-        $html .=   '<div>'.$this->status_badge($data['status'] ?? 'Onbekend').'</div>';
-        $html .= '</div>';
+        $html .= '<div class="printcom-ot__header"><h2>Bestelling '.esc_html($orderNum).'</h2></div>';
 
         $html .= '<div class="printcom-ot__row">';
 
-        // Linkerkolom: leverdatum + status
+        // Linker panel: leverdatum & status
         $html .= '<div class="printcom-ot__panel">';
-        $html .=   '<h3>Status & levering</h3>';
-        $html .=   '<p><strong>Status:</strong> '.esc_html($this->human_status($data)).'</p>';
+        $html .=   '<h3>Bestelling '.esc_html($orderNum).'</h3>';
+        $html .=   '<p><strong>Status:</strong> '.esc_html($nl_status).'</p>';
         if ($overall_delivery) {
-            $html .= '<p><strong>'.$overall_delivery.'</strong></p>';
+            $html .= '<p><strong>Verwachte leverdatum (gehele bestelling):</strong> '.esc_html($overall_delivery).'</p>';
         } else {
             $html .= '<p><em>Verwachte leverdatum nog niet beschikbaar.</em></p>';
         }
         $html .= '</div>';
 
-        // Rechterkolom: verzendadres
-                $html .= '<div class="printcom-ot__panel printcom-ot__addr">';
+        // Rechter panel: verzendadres
+        $html .= '<div class="printcom-ot__panel printcom-ot__addr">';
         $html .=   '<h3>Verzendadres</h3>';
         if ($ship_addr) {
             $fn = trim(($ship_addr['firstName'] ?? '').' '.($ship_addr['lastName'] ?? ''));
@@ -387,11 +383,24 @@ class Printcom_Order_Tracker {
                 $html .=   '<div class="printcom-ot__card-img">'.$img_html.'</div>';
                 $html .=   '<div class="printcom-ot__card-body">';
                 $it_status = isset($it['status']) ? (string)$it['status'] : '';
-                $html .= '<div class="printcom-ot__card-title">'.esc_html($title).($qty? ' <span class="printcom-ot__muted">×'.(int)$qty.'</span>' : '');
-                if ($it_status !== '') $html .= ' &nbsp; '.$this->status_badge($it_status);
+                $html .= '<div class="printcom-ot__card-title">'.esc_html($title);
+                if ($it_status !== '') $html .= ' &nbsp; '.$this->status_badge($this->item_status_nl($it_status));
                 $html .= '</div>';                
-                if($sku) $html .= '<div class="printcom-ot__meta"><strong>SKU:</strong> '.esc_html($sku).'</div>';
-                if($options_html) $html .= '<div class="printcom-ot__opts">'.$options_html.'</div>';
+                $specs = $this->build_specs_groups($it);
+                $eig = $specs['eigenschappen']; $extra = $specs['extras'];
+
+                $html .= '<div class="printcom-ot__specs">';
+                if ($eig) {
+                    $html .= '<h4>Eigenschappen</h4><ul>';
+                    foreach ($eig as $ln) $html .= '<li>'.esc_html($ln).'</li>';
+                    $html .= '</ul>';
+                }
+                if ($extra) {
+                    $html .= '<h4>Extra\'s</h4><ul>';
+                    foreach ($extra as $ln) $html .= '<li>'.esc_html($ln).'</li>';
+                    $html .= '</ul>';
+                }
+                $html .= '</div>';
                 $html .= '<div class="printcom-ot__tracks">'.$btn_html.'</div>';                
                 
                 if($inum) $html .= '<div class="printcom-ot__itemnr"><span class="printcom-ot__muted">Itemnummer:</span> '.esc_html($inum).'</div>';
@@ -642,6 +651,124 @@ class Printcom_Order_Tracker {
         return 0;
     }
 
+    private function item_status_nl(string $s): string {
+        $s = strtolower($s);
+        $map = [
+            'delivered'            => 'Bezorgd',
+            'intransit'            => 'Onderweg',
+            'shipped'              => 'Verzonden',
+            'acceptedbysupplier'   => 'In behandeling',
+            'orderreceived'        => 'In behandeling',
+            'readyforproduction'   => 'Gereed voor productie',
+            'printed'              => 'Gereed / Afgewerkt',
+            'finished'             => 'Gereed / Afgewerkt',
+            'canceled'             => 'Geannuleerd',
+            'cancelled'            => 'Geannuleerd',
+            'refusedbysupplier'    => 'Geweigerd',
+            'manualcheck'          => 'Handmatige controle',
+            'error'                => 'Fout',
+            'designadded'          => 'Ontwerp ontvangen',
+            'designconfirmed'      => 'Ontwerp bevestigd',
+            'designrejected'       => 'Ontwerp afgekeurd',
+            'designwarning'        => 'Ontwerp waarschuwing',
+            'packed'               => 'Ingepakt',
+            'preparedforprint'     => 'Gereed voor druk',
+            'qualityapproved'      => 'Kwaliteit goedgekeurd',
+            'qualityrejected'      => 'Kwaliteit afgekeurd',
+            'returned'             => 'Geretourneerd',
+            'returnrequested'      => 'Retour aangevraagd',
+        ];
+        return $map[$s] ?? ucfirst($s);
+    }
+
+    private function tr_label(array $tr, string $key, string $fallback='') : string {
+        return isset($tr[$key]) && is_string($tr[$key]) && $tr[$key] !== '' ? $tr[$key] : $fallback;
+    }
+
+    private function tr_prop_opt(array $tr, string $prop, string $val, string $fallback='') : string {
+        $k = 'property.'.$prop.'.option.'.$val;
+        return $this->tr_label($tr, $k, $fallback);
+    }
+
+    /** Bouwt "Eigenschappen" + "Extra's" tekstregels op basis van options + vertalingen */
+    private function build_specs_groups(array $item) : array {
+        $opts = $item['options'] ?? [];
+        $tr   = $item['productTranslation'] ?? [];
+
+        $eig = []; $extra = [];
+
+        // Aantal (stuks)
+        $copies = isset($opts['copies']) ? (int)$opts['copies'] : (isset($item['quantity'])?(int)$item['quantity']:0);
+        $stuks  = $copies ? number_format($copies, 0, ',', '.') . ' stuks' : '';
+
+        // Printtype (4/4 etc.) + Printingmethod (Offset/Digitaal)
+        $pt_raw = isset($opts['printtype']) ? (string)$opts['printtype'] : '';
+        $pt     = $pt_raw ? $this->tr_prop_opt($tr, 'printtype', $pt_raw, $pt_raw) : '';
+        $pm_raw = isset($opts['printingmethod']) ? (string)$opts['printingmethod'] : '';
+        $pm     = $pm_raw ? $this->tr_prop_opt($tr, 'printingmethod', $pm_raw, ucfirst($pm_raw)) : '';
+
+        // Size
+        $size_code = isset($opts['size']) ? (string)$opts['size'] : '';
+        $size_lbl  = $size_code ? $this->tr_prop_opt($tr, 'size', $size_code, '') : '';
+        if (!$size_lbl) {
+            // fallback uit mm
+            $w = isset($opts['width']) ? (string)$opts['width'] : '';
+            $h = isset($opts['height'])? (string)$opts['height']: '';
+            if ($w && $h) $size_lbl = $w.' x '.$h.' mm';
+        }
+
+        // Materiaal
+        $mat_code = isset($opts['material']) ? (string)$opts['material'] : '';
+        $material = $mat_code ? $this->tr_prop_opt($tr, 'material', $mat_code, '') : '';
+
+        // === EIGENSCHAPPEN samenstellen ===
+        $line1 = trim(implode(', ', array_filter([$stuks, $pt, $pm])));
+        if ($line1) $eig[] = $line1;
+        if ($size_lbl) $eig[] = $size_lbl;
+        if ($material) $eig[] = $material;
+
+        // === EXTRAʼS ===
+        // Schoonsnijden
+        if (isset($opts['clean_cut']) && $this->tr_prop_opt($tr, 'clean_cut', (string)$opts['clean_cut']) !== $this->tr_prop_opt($tr, 'clean_cut', 'no')) {
+            $extra[] = 'Schoonsnijden';
+        }
+        // Laminaat/finish (negeer "geen")
+        if (!empty($opts['finish'])) {
+            $f = $this->tr_prop_opt($tr, 'finish', (string)$opts['finish'], '');
+            if ($f && stripos($f, 'Geen') === false) $extra[] = $f;
+        }
+        // Rillen/creasing (negeer "niet gerild")
+        if (isset($opts['creasing'])) {
+            $c = $this->tr_prop_opt($tr, 'creasing', (string)$opts['creasing'], '');
+            if ($c && stripos($c, 'Niet gerild') === false) $extra[] = $c;
+        }
+        // Vouwen/fold → Plano geleverd (ongevouwen)
+        if (!empty($opts['fold'])) {
+            $fold_lbl = $this->tr_prop_opt($tr, 'fold', (string)$opts['fold'], '');
+            if ($fold_lbl) {
+                if (stripos($fold_lbl, 'Ongevouwen') !== false || stripos($fold_lbl, 'Plano') !== false) {
+                    $extra[] = 'Plano geleverd (ongevouwen)';
+                } elseif (stripos($fold_lbl, 'Ongevouwen') === false) {
+                    $extra[] = $fold_lbl;
+                }
+            }
+        }
+        // Bundelen / verpakking / extras
+        if (!empty($opts['standard_bundle']) && $this->tr_prop_opt($tr,'standard_bundle',(string)$opts['standard_bundle'],'') ){
+            $extra[] = $this->tr_prop_opt($tr,'standard_bundle',(string)$opts['standard_bundle'],'Bundelen');
+        }
+        if (!empty($opts['packaging_extras'])) {
+            $extra[] = $this->tr_prop_opt($tr,'packaging_extras',(string)$opts['packaging_extras'],'Verpakking');
+        }
+
+        // numberOfDesigns → alleen tonen als >1
+        if (!empty($opts['numberOfDesigns']) && (int)$opts['numberOfDesigns'] > 1) {
+            $extra[] = 'Aantal ontwerpen: '.(int)$opts['numberOfDesigns'];
+        }
+
+        return ['eigenschappen'=>$eig, 'extras'=>$extra];
+    }
+
     private function detect_carrier_from_track(string $url, string $method = ''): array {
         $u = strtolower($url);
         $m = strtolower($method);
@@ -727,37 +854,37 @@ class Printcom_Order_Tracker {
         .printcom-ot__chip{background:#f5f5f5;border:1px solid #eee;border-radius:999px;padding:2px 8px;font-size:.8rem}
         .printcom-ot__tracks{margin-top:8px}
         .printcom-ot--error{border:1px solid #f5c2c7;background:#f8d7da;padding:12px;border-radius:8px;color:#842029}
-        .sidebar, #sidebar, .et_right_sidebar #sidebar, .et_left_sidebar #sidebar { display:none !important; }
-        #left-area, .et_right_sidebar #left-area, .et_pb_row { width:100% !important; max-width:100% !important; }
         ';
         $css .= '
+        /* badges, panelen, knoppen */
         .printcom-ot__header{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
-        .printcom-ot__header .badge{margin-left:auto}
         .badge{display:inline-block;padding:4px 10px;border-radius:999px;font-size:.85rem;font-weight:600}
         .badge--success{background:#E6F4EA;color:#1E7F41}
         .badge--info{background:#E6F2FB;color:#0B63C4}
         .badge--warn{background:#FFF4E5;color:#B76E00}
         .badge--danger{background:#FDEAEA;color:#B42318}
-        .badge--neutral{background:#F1F1F1;color:#555}
 
         .printcom-ot__row{display:grid;grid-template-columns:1.2fr .8fr;gap:18px;margin:10px 0 22px}
         @media(max-width:900px){ .printcom-ot__row{grid-template-columns:1fr} }
-
         .printcom-ot__panel{border:1px solid #eee;border-radius:12px;padding:14px;background:#fff}
-        .printcom-ot__panel h3{margin-top:0}
-        .printcom-ot__addr p{margin:.2rem 0}
 
         .btn{display:inline-block;padding:10px 14px;border-radius:10px;text-decoration:none;border:1px solid #ddd}
         .btn--track{background:#0B63C4;color:#fff;border-color:#0B63C4}
         .btn--track[aria-disabled="true"]{background:#cbd5e1;border-color:#cbd5e1;color:#fff;cursor:not-allowed}
         .btn--sm{padding:8px 12px;font-size:.9rem}
-        .carrier-chip{display:inline-flex;align-items:center;gap:8px;padding:4px 8px;border-radius:999px;background:#f5f5f5;border:1px solid #eee;font-size:.85rem}
+        .carrier-chip{display:inline-flex;align-items:center;gap:8px;padding:4px 8px;border-radius:999px;background:#f5f5f5;border:1px solid #eee;font-size:.85rem;margin-left:8px}
         .carrier-chip .dot{width:8px;height:8px;border-radius:50%}
         .carrier-postnl .dot{background:#ff6600}
-        .carrier-dhl .dot{background:#ffcc00}
-        .carrier-dpd .dot{background:#cc0000}
-        .carrier-ups .dot{background:#623a18}
-        .carrier-gls .dot{background:#003399}
+        .carrier-dhl   .dot{background:#ffcc00}
+        .carrier-dpd   .dot{background:#cc0000}
+        .carrier-ups   .dot{background:#623a18}
+        .carrier-gls   .dot{background:#003399}
+
+        /* product specs blokken */
+        .printcom-ot__specs{margin:10px 0 6px}
+        .printcom-ot__specs h4{margin:.2rem 0;font-size:1rem}
+        .printcom-ot__specs ul{margin:.3rem 0 0 1.2rem;padding:0}
+        .printcom-ot__specs li{margin:.15rem 0}
         ';
         wp_register_style('printcom-ot-style', false); wp_enqueue_style('printcom-ot-style'); wp_add_inline_style('printcom-ot-style',$css);
     }
