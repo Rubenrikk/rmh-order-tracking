@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     1.6.1
+ * Version:     1.6.2
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -397,33 +397,60 @@ class Printcom_Order_Tracker {
             <tfoot><tr><td colspan="3"><button class="button" id="printcom-ot-row-add">+ Regel toevoegen</button></td></tr></tfoot>
         </table>
         <script>
+        <script>
         (function($){
-            $(function(){
-                const $tbl=$('#printcom-ot-item-table tbody');
-                $('#printcom-ot-row-add').on('click',function(e){e.preventDefault();
-                    $tbl.append(`<tr>
-                        <td><input type="text" name="printcom_ot_item_key[]" value="" class="regular-text" placeholder="bijv. 6001831441-2"/></td>
-                        <td>
-                          <div class="printcom-ot-item-prev"><em>Geen</em></div>
-                          <input type="hidden" name="printcom_ot_item_media[]" value=""/>
-                          <button class="button printcom-ot-pick">Kies/Upload</button>
-                          <button class="button printcom-ot-clear">X</button>
-                        </td>
-                        <td><button class="button link-delete printcom-ot-row-del">Verwijderen</button></td>
-                    </tr>`);
-                });
-                $(document).on('click','.printcom-ot-row-del',function(e){e.preventDefault();$(this).closest('tr').remove();});
-                let frame;
-                $(document).on('click','.printcom-ot-pick',function(e){
-                    e.preventDefault();
-                    const $td=$(this).closest('td');
-                    if(frame){frame.open();return;}
-                    frame=wp.media({title:'Kies of upload afbeelding',button:{text:'Gebruik deze afbeelding'},multiple:false});
-                    frame.on('select',function(){const a=frame.state().get('selection').first().toJSON();$td.find('input[type=hidden]').val(a.id);$td.find('.printcom-ot-item-prev').html('<img src="'+a.url+'" style="max-height:60px"/>');});
-                    frame.open();
-                });
-                $(document).on('click','.printcom-ot-clear',function(e){e.preventDefault();const $td=$(this).closest('td');$td.find('input[type=hidden]').val('');$td.find('.printcom-ot-item-prev').html('<em>Geen</em>');});
+          $(function(){
+            const $tbl = $('#printcom-ot-item-table tbody');
+
+            // Nieuwe lege regel
+            $('#printcom-ot-row-add').on('click', function(e){
+              e.preventDefault();
+              $tbl.append(`<tr>
+                <td><input type="text" name="printcom_ot_item_key[]" value="" class="regular-text" placeholder="bijv. 6001831441-2"/></td>
+                <td>
+                  <div class="printcom-ot-item-prev"><em>Geen</em></div>
+                  <input type="hidden" name="printcom_ot_item_media[]" value=""/>
+                  <button class="button printcom-ot-pick">Kies/Upload</button>
+                  <button class="button printcom-ot-clear">X</button>
+                </td>
+                <td><button class="button link-delete printcom-ot-row-del">Verwijderen</button></td>
+              </tr>`);
             });
+
+            // Rij verwijderen
+            $(document).on('click', '.printcom-ot-row-del', function(e){
+              e.preventDefault();
+              $(this).closest('tr').remove();
+            });
+
+            // Belangrijk: maak per klik een NIEUW media frame, zodat de selectie aan de juiste rij hangt
+            $(document).on('click', '.printcom-ot-pick', function(e){
+              e.preventDefault();
+              const $td = $(this).closest('td');
+
+              const frame = wp.media({
+                title: 'Kies of upload afbeelding',
+                button: { text: 'Gebruik deze afbeelding' },
+                multiple: false
+              });
+
+              frame.on('select', function(){
+                const a = frame.state().get('selection').first().toJSON();
+                $td.find('input[type=hidden]').val(a.id);
+                $td.find('.printcom-ot-item-prev').html('<img src="'+a.url+'" style="max-height:60px"/>');
+              });
+
+              frame.open();
+            });
+
+            // Clear
+            $(document).on('click', '.printcom-ot-clear', function(e){
+              e.preventDefault();
+              const $td = $(this).closest('td');
+              $td.find('input[type=hidden]').val('');
+              $td.find('.printcom-ot-item-prev').html('<em>Geen</em>');
+            });
+          });
         })(jQuery);
         </script>
         <?php
