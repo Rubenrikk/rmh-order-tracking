@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     1.6.3
+ * Version:     1.6.4
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -222,8 +222,20 @@ class Printcom_Order_Tracker {
         // prioriteit voor warming
         $st=get_option(self::OPT_STATE,[]); $e=$st[$orderNum]??['status'=>null,'complete_at'=>null,'last_seen'=>null]; $e['last_seen']=time(); $st[$orderNum]=$e; update_option(self::OPT_STATE,$st,false);
 
-        // custom images per item (admin)
-        $item_imgs=[]; if (is_singular('page')) { $item_imgs=get_post_meta(get_the_ID(),self::META_ITEM_IMGS,true); if(!is_array($item_imgs)) $item_imgs=[]; }
+        // Per-item custom images (admin-added) – haal ze op via de gemapte pagina voor dit order
+        $item_imgs = [];
+        $page_id = 0;
+        $mappings = get_option(self::OPT_MAPPINGS, []);
+        if (!empty($mappings[$orderNum])) {
+            $page_id = (int) $mappings[$orderNum];
+        } elseif (get_the_ID()) {
+            // fallback: current page id als we niet in de mapping zitten (bijv. handmatig geplaatste shortcode)
+            $page_id = (int) get_the_ID();
+        }
+        if ($page_id) {
+            $item_imgs = get_post_meta($page_id, self::META_ITEM_IMGS, true);
+            if (!is_array($item_imgs)) $item_imgs = [];
+        }
 
         $statusLabel=$this->human_status($data);
 
