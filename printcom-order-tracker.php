@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     1.7.1
+ * Version:     1.7.2
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -289,15 +289,14 @@ class Printcom_Order_Tracker {
         $statusLabel=$this->human_status($data);
 
         $html  = '<div class="printcom-ot">';
-        $html .= '<div class="printcom-ot__header"><h2>Bestelling '.esc_html($orderNum).'</h2></div>';
-
         $html .= '<div class="printcom-ot__row">';
 
         // Linker panel: leverdatum & status
         $html .= '<div class="printcom-ot__panel">';
-        $html .=   '<h3>Bestelling '.esc_html($orderNum).'</h3>';
+        $html .=   '<h3>Status & levering</h3>';
         $html .=   '<p><strong>Status:</strong> '.esc_html($nl_status).'</p>';
         if ($overall_delivery) {
+            // Let op: $overall_delivery is alleen de datumrange (bijv. "12-09 of 16-09")
             $html .= '<p><strong>Verwachte leverdatum (gehele bestelling):</strong> '.esc_html($overall_delivery).'</p>';
         } else {
             $html .= '<p><em>Verwachte leverdatum nog niet beschikbaar.</em></p>';
@@ -789,7 +788,6 @@ class Printcom_Order_Tracker {
     }
 
     private function render_delivery_window_range(array $shipments): ?string {
-        // Berekent globale window uit array shipments (order-level of item-level)
         $start=null; $end=null;
         foreach ($shipments as $s) {
             $d1 = !empty($s['deliveryDate']) ? $this->fmt_date_ymdh((string)$s['deliveryDate']) : null;
@@ -802,10 +800,10 @@ class Printcom_Order_Tracker {
 
         $fmt = function(DateTime $dt){ return $dt->format('d-m'); };
         if ($start && $end && $start->format('d-m') !== $end->format('d-m')) {
-            return 'Verwachte leverdatum: '.$fmt($start).' of '.$fmt($end);
+            return $fmt($start).' of '.$fmt($end);
         }
         $one = $start ?: $end;
-        return 'Verwachte leverdatum: '.$fmt($one);
+        return $fmt($one);
     }
 
     private function extract_primary_shipping_address(array $order): ?array {
