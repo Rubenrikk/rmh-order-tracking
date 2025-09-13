@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     1.8.1
+ * Version:     1.8.2
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -419,39 +419,7 @@ class Printcom_Order_Tracker {
                 $html .=   '</div>'; // grid
                 $html .= '</div>';   // item
             }
-
-                // Opties: compact + met labels waar mogelijk
-                $options_html = $this->render_options_compact($it['options'] ?? [], $it['productTranslation'] ?? []);
-
-                $html .= '<div class="printcom-ot__card">';
-                $html .=   '<div class="printcom-ot__card-img">'.$img_html.'</div>';
-                $html .=   '<div class="printcom-ot__card-body">';
-                $it_status = isset($it['status']) ? (string)$it['status'] : '';
-                $html .= '<div class="printcom-ot__card-title">'.esc_html($title);
-                if ($it_status !== '') $html .= ' &nbsp; '.$this->status_badge($this->item_status_nl($it_status));
-                $html .= '</div>';                
-                $specs = $this->build_specs_groups($it);
-                $eig = $specs['eigenschappen']; $extra = $specs['extras'];
-
-                $html .= '<div class="printcom-ot__specs">';
-                if ($eig) {
-                    $html .= '<h4>Eigenschappen</h4><ul>';
-                    foreach ($eig as $ln) $html .= '<li>'.esc_html($ln).'</li>';
-                    $html .= '</ul>';
-                }
-                if ($extra) {
-                    $html .= '<h4>Extra&#39;s</h4><ul>';
-                    foreach ($extra as $ln) $html .= '<li>'.esc_html($ln).'</li>';
-                    $html .= '</ul>';
-                }
-                $html .= '</div>';
-                $html .= '<div class="printcom-ot__tracks">'.$btn_html.'</div>';                
-                
-                if($inum) $html .= '<div class="printcom-ot__itemnr"><span class="printcom-ot__muted">Itemnummer:</span> '.esc_html($inum).'</div>';
-                $html .=   '</div>';
-                $html .= '</div>';
-            }
-            $html .= '</div>';
+            $html .=   '</div>'; // grid
         } else {
             $html .= '<p><em>Er zijn nog geen producten geregistreerd voor deze bestelling.</em></p>';
         }
@@ -459,7 +427,7 @@ class Printcom_Order_Tracker {
         $html .= '</div>'; // wrapper
 
         return $html;
-    }
+        }
 
     private function pretty_product_title(array $item): string {
         $qty  = isset($item['quantity']) ? (int)$item['quantity'] : 1;
