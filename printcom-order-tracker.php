@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     1.6.2
+ * Version:     1.6.3
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -372,37 +372,56 @@ class Printcom_Order_Tracker {
     }
 
     public function metabox_item_images($post) {
-        if (strpos($post->post_content,'[print_order_status')===false){ echo '<p>Deze pagina lijkt geen Print.com orderpagina te zijn.</p>'; return; }
+        if (strpos($post->post_content,'[print_order_status')===false){
+            echo '<p>Deze pagina lijkt geen Print.com orderpagina te zijn.</p>';
+            return;
+        }
         wp_enqueue_media();
-        $map=get_post_meta($post->ID,self::META_ITEM_IMGS,true); if(!is_array($map)) $map=[];
+        $map = get_post_meta($post->ID, self::META_ITEM_IMGS, true);
+        if (!is_array($map)) $map = [];
         ?>
         <p>Voeg per <strong>orderItemNumber</strong> een afbeelding toe. Deze verschijnt bij het juiste product op de bestelpagina.</p>
         <table class="widefat striped" id="printcom-ot-item-table">
-            <thead><tr><th style="width:220px;">orderItemNumber</th><th>Afbeelding</th><th style="width:100px;">Actie</th></tr></thead>
-            <tbody>
-            <?php if($map): foreach($map as $k=>$att_id):
-                $src=$att_id?wp_get_attachment_image_src((int)$att_id,'thumbnail'):null; ?>
+            <thead>
                 <tr>
-                    <td><input type="text" name="printcom_ot_item_key[]" value="<?php echo esc_attr($k); ?>" class="regular-text" placeholder="bijv. 6001831441-2"/></td>
+                    <th style="width:220px;">orderItemNumber</th>
+                    <th>Afbeelding</th>
+                    <th style="width:100px;">Actie</th>
+                </tr>
+            </thead>
+            <tbody>
+            <?php if ($map): foreach ($map as $k=>$att_id):
+                $src = $att_id ? wp_get_attachment_image_src((int)$att_id, 'thumbnail') : null; ?>
+                <tr>
+                    <td>
+                        <input type="text" name="printcom_ot_item_key[]" value="<?php echo esc_attr($k); ?>" class="regular-text" placeholder="bijv. 6001831441-2"/>
+                    </td>
                     <td>
                         <div class="printcom-ot-item-prev"><?php echo $src?'<img src="'.esc_url($src[0]).'" style="max-height:60px" />':'<em>Geen</em>'; ?></div>
                         <input type="hidden" name="printcom_ot_item_media[]" value="<?php echo esc_attr((int)$att_id); ?>"/>
-                        <button class="button printcom-ot-pick">Kies/Upload</button>
-                        <button class="button printcom-ot-clear">X</button>
+                        <button type="button" class="button printcom-ot-pick">Kies/Upload</button>
+                        <button type="button" class="button printcom-ot-clear">X</button>
                     </td>
-                    <td><button class="button link-delete printcom-ot-row-del">Verwijderen</button></td>
+                    <td>
+                        <button type="button" class="button link-delete printcom-ot-row-del">Verwijderen</button>
+                    </td>
                 </tr>
             <?php endforeach; endif; ?>
             </tbody>
-            <tfoot><tr><td colspan="3"><button class="button" id="printcom-ot-row-add">+ Regel toevoegen</button></td></tr></tfoot>
+            <tfoot>
+                <tr>
+                    <td colspan="3">
+                        <button type="button" class="button" id="printcom-ot-row-add">+ Regel toevoegen</button>
+                    </td>
+                </tr>
+            </tfoot>
         </table>
-        <script>
         <script>
         (function($){
           $(function(){
             const $tbl = $('#printcom-ot-item-table tbody');
 
-            // Nieuwe lege regel
+            // Nieuwe regel toevoegen (let op type="button" om submit te voorkomen)
             $('#printcom-ot-row-add').on('click', function(e){
               e.preventDefault();
               $tbl.append(`<tr>
@@ -410,10 +429,10 @@ class Printcom_Order_Tracker {
                 <td>
                   <div class="printcom-ot-item-prev"><em>Geen</em></div>
                   <input type="hidden" name="printcom_ot_item_media[]" value=""/>
-                  <button class="button printcom-ot-pick">Kies/Upload</button>
-                  <button class="button printcom-ot-clear">X</button>
+                  <button type="button" class="button printcom-ot-pick">Kies/Upload</button>
+                  <button type="button" class="button printcom-ot-clear">X</button>
                 </td>
-                <td><button class="button link-delete printcom-ot-row-del">Verwijderen</button></td>
+                <td><button type="button" class="button link-delete printcom-ot-row-del">Verwijderen</button></td>
               </tr>`);
             });
 
@@ -423,7 +442,7 @@ class Printcom_Order_Tracker {
               $(this).closest('tr').remove();
             });
 
-            // Belangrijk: maak per klik een NIEUW media frame, zodat de selectie aan de juiste rij hangt
+            // Belangrijk: per klik een NIEUW media frame zodat de selectie naar de juiste rij gaat
             $(document).on('click', '.printcom-ot-pick', function(e){
               e.preventDefault();
               const $td = $(this).closest('td');
@@ -433,7 +452,7 @@ class Printcom_Order_Tracker {
                 button: { text: 'Gebruik deze afbeelding' },
                 multiple: false
               });
-
+            
               frame.on('select', function(){
                 const a = frame.state().get('selection').first().toJSON();
                 $td.find('input[type=hidden]').val(a.id);
