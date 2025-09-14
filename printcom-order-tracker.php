@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     1.8.14
+ * Version:     1.8.15
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -172,7 +172,7 @@ class Printcom_Order_Tracker {
                     $link=get_permalink($pid); $title=get_the_title($pid);
                     $del = wp_nonce_url(
                         admin_url('admin-post.php?action=printcom_ot_delete_order&order=' . rawurlencode($ord) . '&hard=1'),
-                        'printcom_ot_delete_order_' . $ord . '_hard'
+                        'printcom_ot_delete_order_' . $ord
                     );
                     ?>
                     <tr>
@@ -272,7 +272,7 @@ class Printcom_Order_Tracker {
         if ($order === '') wp_die('Order ontbreekt.', 400);
 
         // nonce: let op _hard suffix als hard=1
-        $nonce_key = 'printcom_ot_delete_order_' . $order . ($hard ? '_hard' : '');
+        $nonce_key = 'printcom_ot_delete_order_' . $order; // vaste actie-naam
         if (empty($_GET['_wpnonce']) || !wp_verify_nonce(sanitize_text_field(wp_unslash($_GET['_wpnonce'])), $nonce_key)) {
             wp_die('Nonce invalid', 403);
         }
