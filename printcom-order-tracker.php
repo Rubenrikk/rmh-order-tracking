@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     1.8.10
+ * Version:     1.8.11
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -342,7 +342,7 @@ class Printcom_Order_Tracker {
 
                 // Status badge (NL)
                 $it_status = isset($it['status']) ? (string)$it['status'] : '';
-                $status_badge = $it_status !== '' ? $this->status_badge($this->item_status_nl($it_status)) : '';
+                $status_badge = $it_status !== '' ? $this->item_status_badge($it_status) : '';
 
                 // Eigenschappen & Extraʼs
                 $specs = $this->build_specs_groups($it);
@@ -875,14 +875,25 @@ class Printcom_Order_Tracker {
         return null;
     }
 
-    private function status_badge(string $status): string {
+    private function item_status_badge(string $status): string {
         $s = strtolower($status);
-        $cls = 'badge--neutral';
-        if (in_array($s,['shipped','intransit'])) $cls='badge--info';
-        if (in_array($s,['delivered','finished','printed'])) $cls='badge--success';
-        if (in_array($s,['acceptedbysupplier','orderreceived','readyforproduction','processing'])) $cls='badge--warn';
-        if (in_array($s,['cancelled','canceled','refusedbysupplier','error'])) $cls='badge--danger';
-        return '<span class="badge '.$cls.'">'.esc_html($status).'</span>';
+        $class = 'onbekend';
+        switch($s){
+            case 'readyforproduction':
+            case 'printed':
+            case 'finished':           $class='inproductie';   break;
+            case 'orderreceived':
+            case 'acceptedbysupplier':
+            case 'processing':         $class='behandelen';    break;
+            case 'shipped':
+            case 'intransit':          $class='verzonden';     break;
+            case 'delivered':          $class='bezorgd';       break;
+            case 'cancelled':
+            case 'canceled':
+            case 'refusedbysupplier':  $class='geannuleerd';   break;
+        }
+        return '<span class="printcom-ot__badge printcom-ot__badge--'.$class.'">'.
+               esc_html($this->item_status_nl($status)).'</span>';
     }
 
     private function extract_item_address(array $item): ?array {
