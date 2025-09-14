@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     1.8.24
+ * Version:     1.8.25
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -208,10 +208,6 @@ class Printcom_Order_Tracker {
         $title    = 'Bestelling '.$orderNum;
         $shortcode= sprintf('[print_order_status order="%s"]', esc_attr($orderNum));
 
-        // (optioneel) template-detectie – mag blijven staan
-        $divi_full_tpl = locate_template('et_full_width_page.php');      // Divi
-        $blank_tpl     = locate_template('page-template-blank.php');     // soms Divi blank
-
         if (isset($mappings[$orderNum]) && get_post_status((int)$mappings[$orderNum])) {
             // BESTOND AL → bijwerken
             $page_id = (int)$mappings[$orderNum];
@@ -222,20 +218,12 @@ class Printcom_Order_Tracker {
             ];
             $cur = get_post($page_id);
             if ($cur && strpos($cur->post_content, '[print_order_status') === false) {
-                $update['post_content'] = $cur->post_content."\n\n".$shortcode;
+                $update['post_content'] = $cur->post_content . "\n\n" . $shortcode;
             }
             wp_update_post($update);
 
-            // Forceer Divi: Geen zijbalk
-            $this->apply_divi_no_sidebar_layout($page_id);
-
-            // (optioneel) ook een template forceren
-            if ($divi_full_tpl || $blank_tpl) {
-                $tpl = $divi_full_tpl ? 'et_full_width_page.php' : 'page-template-blank.php';
-                if (get_post_meta($page_id, '_wp_page_template', true) !== $tpl) {
-                    update_post_meta($page_id, '_wp_page_template', $tpl);
-                }
-            }   
+            // Forceer Divi: full-width + geen zijbalk
+            $this->apply_divi_fullwidth_no_sidebar($page_id);
 
         } else {
             // BESTOND NIET → aanmaken
@@ -247,19 +235,15 @@ class Printcom_Order_Tracker {
                 'post_type'    => 'page',
                 'post_author'  => get_current_user_id(),
             ]);
+
             if (is_wp_error($page_id) || !$page_id) return false;
 
             // Map opslaan
             $mappings[$orderNum] = (int)$page_id;
             update_option(self::OPT_MAPPINGS, $mappings, false);
 
-            // Forceer Divi: Geen zijbalk
-            $this->apply_divi_no_sidebar_layout((int)$page_id);
-
-            // (optioneel) ook een template forceren
-            if ($divi_full_tpl || $blank_tpl) {
-                update_post_meta($page_id, '_wp_page_template', $divi_full_tpl ? 'et_full_width_page.php' : 'page-template-blank.php');
-            }
+            // Forceer Divi: full-width + geen zijbalk
+            $this->apply_divi_fullwidth_no_sidebar((int)$page_id);
         }
 
         return (int)$page_id;
@@ -1063,16 +1047,21 @@ class Printcom_Order_Tracker {
     }
 
     /**
-     * Forceer voor Divi: Pagina Layout = Geen zijbalk
+     * Forceer Divi: geen zijbalk + full-width template.
      */
-    private function apply_divi_no_sidebar_layout(int $page_id): void {
+    private function apply_divi_fullwidth_no_sidebar(int $page_id): void {
         if ($page_id <= 0) return;
 
-        // Zet Divi paginalayout op "Geen zijbalk"
+        // 1) Divi page layout: Geen zijbalk
+        //   (waarden: et_right_sidebar | et_left_sidebar | et_no_sidebar)
         update_post_meta($page_id, 'et_pb_page_layout', 'et_no_sidebar');
 
-        // (optioneel) als je tóch het Divi full-width template wilt:
-        // update_post_meta($page_id, '_wp_page_template', 'et_full_width_page.php');
+        // 2) Template: et_full_width_page.php
+        //   Let op: _wp_page_template verwacht de bestandsnaam, geen pad.
+        $current_tpl = get_post_meta($page_id, '_wp_page_template', true);
+        if ($current_tpl !== 'et_full_width_page.php') {
+            update_post_meta($page_id, '_wp_page_template', 'et_full_width_page.php');
+        }
     }
 
     /* ===== Styles ===== */
