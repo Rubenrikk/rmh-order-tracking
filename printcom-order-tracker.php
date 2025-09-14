@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     1.9.1
+ * Version:     1.9.2
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -1173,7 +1173,7 @@ class Printcom_Order_Tracker {
 
         .printcom-ot__specs h4{color:#B71C1C}
         .printcom-ot__specs ul{list-style:none!important;margin:.2rem 0 0!important;padding-left:0!important}
-        .printcom-ot__specs li{list-style-type:none!important;margin:.2rem 0;padding-left:0}
+        .printcom-ot__specs li{list-style-type:none!important;color:#232323;margin:.2rem 0;padding-left:0}
 
         .printcom-ot__delivery{display:flex;flex-direction:column;gap:16px}
         .printcom-ot__dtbig{color:#232323;font-size:1.2rem;font-weight:700;margin:.2rem 0}
@@ -1186,6 +1186,17 @@ class Printcom_Order_Tracker {
         .btn{display:inline-block;padding:12px 16px;border-radius:12px;text-decoration:none;border:1px solid #ddd}
         .btn--track{background:#E53935;color:#fff;border-color:#B71C1C}
         .btn--track[aria-disabled="true"]{background:#ffcdd2;border-color:#ef9a9a;color:#B71C1C;cursor:not-allowed}
+        
+        /* "Bestelde producten" weer links */
+        .printcom-ot__items h3{text-align:left!important;margin-left:0}
+
+        /* Mobiel: badge ONDER de titel én rechts uitlijnen */
+        @media(max-width:767px){
+          .printcom-ot__item-header{display:flex!important;flex-direction:column!important;align-items:stretch!important}
+          .printcom-ot__badge-top{position:static!important;display:inline-block!important;margin:.35rem 0 0 auto!important}
+          .printcom-ot__title{margin-bottom:.15rem!important}
+          .printcom-ot__sub{margin-top:.15rem!important}
+        }
         ';
 
         wp_register_style('printcom-ot-style', false);
