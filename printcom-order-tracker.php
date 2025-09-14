@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     1.8.19
+ * Version:     1.8.20
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -302,47 +302,34 @@ class Printcom_Order_Tracker {
         if (!current_user_can('manage_options')) wp_die('Unauthorized', 403);
 
         $order = isset($_GET['order']) ? sanitize_text_field(wp_unslash($_GET['order'])) : '';
-        if ($order === '') wp_die('Order ontbreekt.', 400);
+        $pid   = isset($_GET['pid']) ? (int) $_GET['pid'] : 0;
 
-        // vaste nonce
+        if ($order === '' || $pid <= 0) wp_die('Order of pagina ontbreekt.', 400);
+
+        // nonce check
         $nonce_key = 'printcom_ot_delete_order_' . $order;
         if (empty($_GET['_wpnonce']) || !wp_verify_nonce(sanitize_text_field(wp_unslash($_GET['_wpnonce'])), $nonce_key)) {
             wp_die('Nonce invalid', 403);
         }
 
-        $hard = isset($_GET['hard']) && (string)$_GET['hard'] === '1';
-        $pid_param = isset($_GET['pid']) ? (int) $_GET['pid'] : 0;
-
-        // Lees actuele mapping
-        $mappings = get_option(self::OPT_MAPPINGS, []);
-        $mapped_pid = isset($mappings[$order]) ? (int)$mappings[$order] : 0;
-
-        // Kies welke PID we mogen verwijderen:
-        // - Als pid param == mapping pid, dan die gebruiken (voorkomt verkeerde delete)
-        // - Anders, als mapping bestaat, gebruik mapping
-        // - Anders 0 (niets te verwijderen)
-        $pid_to_delete = 0;
-        if ($hard) {
-            if ($pid_param > 0 && $mapped_pid > 0 && $pid_param === $mapped_pid) {
-                $pid_to_delete = $pid_param;
-            } elseif ($mapped_pid > 0) {
-                $pid_to_delete = $mapped_pid;
-            }
-            if ($pid_to_delete > 0) {
-                wp_delete_post($pid_to_delete, true); // force delete
-            }
-        }
-
-        // Verwijder alleen de mapping/state (pagina is hierboven al verwijderd indien nodig)
+        // Mapping altijd opruimen
         $this->remove_order_mapping($order, false);
 
-        // Feedback
+        // Pagina hard verwijderen
+        $deleted = false;
+        if (get_post_status($pid)) {
+            wp_delete_post($pid, true);
+            $deleted = true;
+        }
+
+        // Terug naar adminpagina met nette melding
         $dest = admin_url('options-general.php?page=printcom-ot');
         $dest = add_query_arg([
             'printcom_deleted_order' => rawurlencode($order),
-            'page_deleted'           => $pid_to_delete > 0 ? '1' : '0',
-            'pid'                    => (string)$pid_to_delete,
+            'page_deleted'           => $deleted ? '1' : '0',
+            'pid'                    => (string)$pid,
         ], $dest);
+
         wp_safe_redirect($dest);
         exit;
     }
