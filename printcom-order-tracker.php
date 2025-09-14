@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     1.8.25
+ * Version:     1.8.26
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -23,6 +23,7 @@ class Printcom_Order_Tracker {
         add_action('admin_menu', [$this, 'admin_menu']);
         add_action('admin_init', [$this, 'register_settings']);
         add_action('admin_post_printcom_ot_delete_order', [$this, 'admin_handle_delete_order']);
+        add_action('save_post_page', [$this, 'enforce_divi_layout_on_save'], 20, 3);
 
         add_shortcode('print_order_status', [$this, 'render_order_shortcode']);
 
@@ -234,6 +235,11 @@ class Printcom_Order_Tracker {
                 'post_status'  => 'publish',
                 'post_type'    => 'page',
                 'post_author'  => get_current_user_id(),
+                // ✨ meteen goed zetten:
+                'meta_input'   => [
+                    '_wp_page_template' => 'et_full_width_page.php',
+                    'et_pb_page_layout' => 'et_no_sidebar', // Geen zijbalk
+                ],
             ]);
 
             if (is_wp_error($page_id) || !$page_id) return false;
@@ -304,6 +310,16 @@ class Printcom_Order_Tracker {
 
         wp_safe_redirect( wp_get_referer() ?: admin_url('options-general.php?page=printcom-ot') );
         exit;
+    }
+
+    public function enforce_divi_layout_on_save($post_ID, $post, $update) {
+        if ($post->post_type !== 'page') return;
+
+        // Alleen afdwingen voor door de plugin beheerde orderpagina’s
+        $maps = get_option(self::OPT_MAPPINGS, []);
+        if (!in_array((int)$post_ID, array_map('intval', $maps), true)) return;
+
+        $this->apply_divi_fullwidth_no_sidebar((int)$post_ID);
     }
 
     /* ===== Shortcode ===== */
