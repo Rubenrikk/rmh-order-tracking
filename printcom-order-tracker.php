@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     1.8.11
+ * Version:     1.8.12
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -705,33 +705,42 @@ class Printcom_Order_Tracker {
     }
 
     private function item_status_nl(string $s): string {
-        $s = strtolower($s);
         $map = [
-            'delivered'            => 'Bezorgd',
-            'intransit'            => 'Onderweg',
-            'shipped'              => 'Verzonden',
-            'acceptedbysupplier'   => 'In productie',
-            'orderreceived'        => 'In productie',
-            'readyforproduction'   => 'Gereed voor productie',
-            'printed'              => 'Gereed / Afgewerkt',
-            'finished'             => 'Gereed / Afgewerkt',
-            'canceled'             => 'Geannuleerd',
-            'cancelled'            => 'Geannuleerd',
-            'refusedbysupplier'    => 'Geweigerd',
-            'manualcheck'          => 'Handmatige controle',
-            'error'                => 'Fout',
-            'designadded'          => 'Ontwerp ontvangen',
-            'designconfirmed'      => 'Ontwerp bevestigd',
-            'designrejected'       => 'Ontwerp afgekeurd',
-            'designwarning'        => 'Ontwerp waarschuwing',
-            'packed'               => 'Ingepakt',
-            'preparedforprint'     => 'Gereed voor druk',
-            'qualityapproved'      => 'Kwaliteit goedgekeurd',
-            'qualityrejected'      => 'Kwaliteit afgekeurd',
-            'returned'             => 'Geretourneerd',
-            'returnrequested'      => 'Retour aangevraagd',
+            'ACCEPTEDBYSUPPLIER'   => 'In productie',
+            'CANCELEDBYSUPPLIER'   => 'Geannuleerd door leverancier',
+            'CANCELEDBYUSER'       => 'Geannuleerd door klant',
+            'CUT'                  => 'Gesneden',
+            'DELIVERED'            => 'Bezorgd',
+
+            'DESIGNADDED'          => 'Ontwerp ontvangen',
+            'DESIGNCONFIRMED'      => 'Ontwerp bevestigd',
+            'DESIGNREJECTED'       => 'Ontwerp afgekeurd',
+            'DESIGNWARNING'        => 'Ontwerp waarschuwing',
+
+            'DRAFT'                => 'Concept',
+            'FINISHED'             => 'Afgewerkt',
+            'INTRANSIT'            => 'Onderweg',
+            'MANUALCHECK'          => 'Handmatige controle',
+            'ERROR'                => 'Fout',
+            'WAITINGFORPAYMENT'    => 'Wacht op betaling',
+            'ORDERRECEIVED'        => 'Bestelling ontvangen',
+            'PACKED'               => 'Ingepakt',
+            'POSSIBLYDELAYED'      => 'Mogelijk vertraagd',
+            'PREPAREDFORPRINT'     => 'Gereed voor druk',
+            'PRINTED'              => 'Gedrukt',
+
+            'QUALITYAPPROVED'      => 'Kwaliteit goedgekeurd',
+            'QUALITYREJECTED'      => 'Kwaliteit afgekeurd',
+
+            'READYFORPRODUCTION'   => 'Gereed voor productie',
+            'REFUSEDBYSUPPLIER'    => 'Geweigerd door leverancier',
+            'RETURNED'             => 'Geretourneerd',
+            'RETURNREQUESTED'      => 'Retour aangevraagd',
+            'SENTTOSUPPLIER'       => 'Verstuurd naar leverancier',
+            'SHIPPED'              => 'Verzonden',
         ];
-        return $map[$s] ?? ucfirst($s);
+        $s = strtoupper($s);
+        return $map[$s] ?? ucfirst(strtolower($s));
     }
 
     private function tr_label(array $tr, string $key, string $fallback='') : string {
@@ -876,24 +885,50 @@ class Printcom_Order_Tracker {
     }
 
     private function item_status_badge(string $status): string {
-        $s = strtolower($status);
+        $s = strtoupper($status);
         $class = 'onbekend';
-        switch($s){
-            case 'readyforproduction':
-            case 'printed':
-            case 'finished':           $class='inproductie';   break;
-            case 'orderreceived':
-            case 'acceptedbysupplier':
-            case 'processing':         $class='behandelen';    break;
-            case 'shipped':
-            case 'intransit':          $class='verzonden';     break;
-            case 'delivered':          $class='bezorgd';       break;
-            case 'cancelled':
-            case 'canceled':
-            case 'refusedbysupplier':  $class='geannuleerd';   break;
+
+        switch ($s) {
+            case 'DELIVERED':            $class = 'bezorgd'; break;
+            case 'SHIPPED':
+            case 'INTRANSIT':            $class = 'verzonden'; break;
+
+            case 'ACCEPTEDBYSUPPLIER':
+            case 'READYFORPRODUCTION':
+            case 'PREPAREDFORPRINT':
+            case 'PRINTED':
+            case 'CUT':
+            case 'FINISHED':             $class = 'inproductie'; break;
+
+            case 'ORDERRECEIVED':
+            case 'DRAFT':
+            case 'PACKED':
+            case 'SENTTOSUPPLIER':       $class = 'behandelen'; break;
+
+            case 'CANCELEDBYUSER':
+            case 'CANCELEDBYSUPPLIER':
+            case 'REFUSEDBYSUPPLIER':    $class = 'geannuleerd'; break;
+
+            case 'QUALITYAPPROVED':      $class = 'behandelen'; break;
+            case 'QUALITYREJECTED':      $class = 'geannuleerd'; break;
+
+            case 'RETURNED':
+            case 'RETURNREQUESTED':      $class = 'geannuleerd'; break;
+
+            case 'POSSIBLYDELAYED':      $class = 'deels'; break;
+
+            case 'MANUALCHECK':
+            case 'DESIGNADDED':
+            case 'DESIGNCONFIRMED':
+            case 'DESIGNREJECTED':
+            case 'DESIGNWARNING':
+            case 'WAITINGFORPAYMENT':
+            case 'ERROR':                $class = 'behandelen'; break;
         }
+
         return '<span class="printcom-ot__badge printcom-ot__badge--'.$class.'">'.
-               esc_html($this->item_status_nl($status)).'</span>';
+               esc_html($this->item_status_nl($status)).
+               '</span>';
     }
 
     private function extract_item_address(array $item): ?array {
@@ -996,16 +1031,16 @@ class Printcom_Order_Tracker {
         .printcom-ot__item-header{position:relative;margin-bottom:.5rem}
 
         /* Status-badges */
-        .printcom-ot__badge {display:inline-block;padding:6px 12px;border-radius:20px;font-size:.85rem;font-weight:600;color:#fff;}
+        .printcom-ot__badge{display:inline-block;padding:6px 12px;border-radius:20px;font-size:.85rem;font-weight:600;color:#fff}
 
         /* Kleuren per status */
-        .printcom-ot__badge--inproductie { background:#0B63C4; }     /* blauw */
-        .printcom-ot__badge--behandelen { background:#6c757d; }     /* grijs */
-        .printcom-ot__badge--verzonden   { background:#198754; }     /* groen */
-        .printcom-ot__badge--deels       { background:#ffc107; color:#000; } /* geel */
-        .printcom-ot__badge--bezorgd     { background:#28a745; }     /* felgroen */
-        .printcom-ot__badge--geannuleerd { background:#dc3545; }     /* rood */
-        .printcom-ot__badge--onbekend    { background:#adb5bd; }     /* lichtgrijs */
+        .printcom-ot__badge--inproductie{background:#0B63C4}
+        .printcom-ot__badge--behandelen{background:#6c757d}
+        .printcom-ot__badge--verzonden{background:#198754}
+        .printcom-ot__badge--deels{background:#ffc107;color:#000}
+        .printcom-ot__badge--bezorgd{background:#28a745}
+        .printcom-ot__badge--geannuleerd{background:#dc3545}
+        .printcom-ot__badge--onbekend{background:#adb5bd}
 
         .printcom-ot__panel{background:#fff;border:1px solid #eee;border-radius:14px;padding:14px}
         .printcom-ot__panel h4{coloc:#232323:margin:.2rem 0 8px}
