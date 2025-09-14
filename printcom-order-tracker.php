@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     1.8.26
+ * Version:     1.8.27
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -33,6 +33,8 @@ class Printcom_Order_Tracker {
         add_action('wp_enqueue_scripts', [$this, 'enqueue_styles']);
 
         add_filter('cron_schedules', [$this, 'add_every5_schedule']);
+        add_filter('template_include', [$this, 'force_divi_template_for_orders'], 99);
+        add_filter('body_class',      [$this, 'force_divi_body_classes_for_orders']);
         add_action('printcom_ot_cron_refresh_token', [$this, 'cron_refresh_token']);
         add_action('printcom_ot_cron_warm_cache',   [$this, 'cron_warm_cache']);
 
@@ -320,6 +322,36 @@ class Printcom_Order_Tracker {
         if (!in_array((int)$post_ID, array_map('intval', $maps), true)) return;
 
         $this->apply_divi_fullwidth_no_sidebar((int)$post_ID);
+    }
+
+    public function force_divi_template_for_orders($template) {
+        if (!is_page()) return $template;
+
+        $maps = get_option(self::OPT_MAPPINGS, []);
+        $pid  = get_queried_object_id();
+        if (!$pid || !in_array((int)$pid, array_map('intval', $maps), true)) {
+            return $template;
+        }
+
+        // Force Divi full-width template if available
+        $full = locate_template('et_full_width_page.php');
+        if ($full && file_exists($full)) {
+            return $full;
+        }
+        return $template;
+    }
+
+    public function force_divi_body_classes_for_orders(array $classes) : array {
+        if (!is_page()) return $classes;
+
+        $maps = get_option(self::OPT_MAPPINGS, []);
+        $pid  = get_queried_object_id();
+        if ($pid && in_array((int)$pid, array_map('intval', $maps), true)) {
+            // Tell Divi “no sidebar + full-width” via classes, regardless of UI state
+            $classes[] = 'et_full_width_page';
+            $classes[] = 'et_no_sidebar';
+        }
+        return $classes;
     }
 
     /* ===== Shortcode ===== */
