@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     1.8.9
+ * Version:     1.8.10
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -983,6 +983,18 @@ class Printcom_Order_Tracker {
         .printcom-ot__sub{color:#E53935;font-weight:700;margin:.3rem 0 1rem}
         .printcom-ot__badge-top{position:absolute;right:18px;top:18px}
         .printcom-ot__item-header{position:relative;margin-bottom:.5rem}
+
+        /* Status-badges */
+        .printcom-ot__badge {display:inline-block;padding:6px 12px;border-radius:20px;font-size:.85rem;font-weight:600;color:#fff;}
+
+        /* Kleuren per status */
+        .printcom-ot__badge--inproductie { background:#0B63C4; }     /* blauw */
+        .printcom-ot__badge--behandelen { background:#6c757d; }     /* grijs */
+        .printcom-ot__badge--verzonden   { background:#198754; }     /* groen */
+        .printcom-ot__badge--deels       { background:#ffc107; color:#000; } /* geel */
+        .printcom-ot__badge--bezorgd     { background:#28a745; }     /* felgroen */
+        .printcom-ot__badge--geannuleerd { background:#dc3545; }     /* rood */
+        .printcom-ot__badge--onbekend    { background:#adb5bd; }     /* lichtgrijs */
 
         .printcom-ot__panel{background:#fff;border:1px solid #eee;border-radius:14px;padding:14px}
         .printcom-ot__panel h4{coloc:#232323:margin:.2rem 0 8px}
