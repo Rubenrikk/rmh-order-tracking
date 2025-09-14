@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     1.8.20
+ * Version:     1.8.22
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -136,6 +136,13 @@ class Printcom_Order_Tracker {
     public function orders_page() {
         if (!current_user_can('manage_options')) return;
 
+        // ===== Meldingen via transient (vanuit handler) =====
+        $msg = get_transient('printcom_ot_admin_notice');
+        if ($msg) {
+            delete_transient('printcom_ot_admin_notice');
+            echo '<div class="notice notice-success"><p>' . wp_kses_post($msg) . '</p></div>';
+        }
+
         // Wees-mappings opruimen
         $m = get_option(self::OPT_MAPPINGS, []);
         $chg=false;
@@ -149,18 +156,6 @@ class Printcom_Order_Tracker {
                 $page_id=$this->create_or_update_page_for_order($orderNum);
                 if ($page_id){ $url=get_permalink($page_id); $msg=sprintf('Pagina voor order <strong>%s</strong> is aangemaakt/bijgewerkt: <a href="%s" target="_blank" rel="noopener">%s</a>',esc_html($orderNum),esc_url($url),esc_html($url)); }
                 else { $msg='Er ging iets mis bij het aanmaken of bijwerken van de pagina.'; }
-            }
-        }
-        if (!empty($_GET['printcom_deleted_order'])) {
-            $od  = sanitize_text_field(wp_unslash($_GET['printcom_deleted_order']));
-            $pd  = isset($_GET['page_deleted']) && $_GET['page_deleted'] === '1';
-            $pid = isset($_GET['pid']) ? (int) $_GET['pid'] : 0;
-
-            if ($pd) {
-                $msg = 'Order <strong>'.esc_html($od).'</strong> en pagina (ID: '.(int)$pid.') zijn verwijderd.';
-            } else {
-                $msg = 'Order <strong>'.esc_html($od).'</strong> is uit de lijst verwijderd. '
-                     . 'Pagina (ID: '.(int)$pid.') kon niet worden verwijderd (bestond mogelijk al niet meer).';
             }
         }
 
@@ -306,31 +301,29 @@ class Printcom_Order_Tracker {
 
         if ($order === '' || $pid <= 0) wp_die('Order of pagina ontbreekt.', 400);
 
-        // nonce check
+        // vaste nonce
         $nonce_key = 'printcom_ot_delete_order_' . $order;
         if (empty($_GET['_wpnonce']) || !wp_verify_nonce(sanitize_text_field(wp_unslash($_GET['_wpnonce'])), $nonce_key)) {
             wp_die('Nonce invalid', 403);
         }
 
-        // Mapping altijd opruimen
+        // mapping altijd opruimen
         $this->remove_order_mapping($order, false);
 
-        // Pagina hard verwijderen
+        // pagina hard verwijderen (als hij nog bestaat)
         $deleted = false;
-        if (get_post_status($pid)) {
+        if (get_post($pid)) {
             wp_delete_post($pid, true);
-            $deleted = true;
+            $deleted = (get_post($pid) === null);
         }
 
-        // Terug naar adminpagina met nette melding
-        $dest = admin_url('options-general.php?page=printcom-ot');
-        $dest = add_query_arg([
-            'printcom_deleted_order' => rawurlencode($order),
-            'page_deleted'           => $deleted ? '1' : '0',
-            'pid'                    => (string)$pid,
-        ], $dest);
+        // nette admin-melding opslaan
+        $msg = 'Order <strong>' . esc_html($order) . '</strong> is uit de lijst verwijderd. ';
+        $msg .= $deleted ? 'Pagina (ID: ' . (int)$pid . ') is verwijderd.' :
+                           'Pagina (ID: ' . (int)$pid . ') kon niet worden verwijderd (bestond mogelijk al niet meer).';
+        set_transient('printcom_ot_admin_notice', $msg, 30);
 
-        wp_safe_redirect($dest);
+        wp_safe_redirect(admin_url('options-general.php?page=printcom-ot'));
         exit;
     }
 
