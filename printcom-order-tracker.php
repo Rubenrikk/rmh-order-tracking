@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     1.8.4
+ * Version:     1.8.5
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -687,8 +687,8 @@ class Printcom_Order_Tracker {
             'delivered'            => 'Bezorgd',
             'intransit'            => 'Onderweg',
             'shipped'              => 'Verzonden',
-            'acceptedbysupplier'   => 'In behandeling',
-            'orderreceived'        => 'In behandeling',
+            'acceptedbysupplier'   => 'In productie',
+            'orderreceived'        => 'In productie',
             'readyforproduction'   => 'Gereed voor productie',
             'printed'              => 'Gereed / Afgewerkt',
             'finished'             => 'Gereed / Afgewerkt',
@@ -889,7 +889,7 @@ class Printcom_Order_Tracker {
 
     private function carrier_label_from_method(string $method): string {
         $m = strtolower($method);
-        if (strpos($m,'pna_')===0 || strpos($m,'postnl')!==false) return 'PostNL zonder handtekening';
+        if (strpos($m,'pna_')===0 || strpos($m,'postnl')!==false) return 'PostNL';
         if (strpos($m,'dh')===0  || strpos($m,'dhl')!==false)     return 'DHL';
         if (strpos($m,'dpd')!==false)                              return 'DPD';
         if (strpos($m,'gls')!==false)                              return 'GLS';
@@ -955,7 +955,7 @@ class Printcom_Order_Tracker {
         /* Knoppen */
         .btn{display:inline-block;padding:12px 16px;border-radius:12px;text-decoration:none;border:1px solid #ddd}
         .btn--track{background:#E53935;color:#fff;border-color:#B71C1C}
-        .btn--track[aria-disabled="true"]{background:#E53935;border-color:#B71C1C;color:#fff;cursor:not-allowed}
+        .btn--track[aria-disabled="true"]{background:#232323;border-color:#232323;color:#fff;cursor:not-allowed}
         ';
 
         wp_register_style('printcom-ot-style', false);
