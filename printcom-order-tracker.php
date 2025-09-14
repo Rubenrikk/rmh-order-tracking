@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     1.8.6
+ * Version:     1.8.7
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -363,7 +363,7 @@ class Printcom_Order_Tracker {
                 }
 
                 // Track & Trace (per item)
-                $btn_html = '<a class="btn btn--track" href="#" aria-disabled="true" onclick="return false;">Track &amp; Trace</a>';
+                $btn_html = '<a class="btn btn--track" href="#" aria-disabled="true" onclick="return false;">Wacht op verzending</a>';
                 if (!empty($tracks_by_item[$inum])) {
                     $first = $tracks_by_item[$inum][0];
                     $btn_html = '<a class="btn btn--track" href="'.esc_url($first).'" target="_blank" rel="nofollow noopener">Open Track &amp; Trace</a>';
@@ -405,29 +405,52 @@ class Printcom_Order_Tracker {
                 $html .=     '<div class="printcom-ot__panel">';
                 $html .=       '<h4>Bezorgadres(sen)</h4>';
                 if ($addr) {
-                    $fn = trim(($addr['firstName'] ?? '').' '.($addr['lastName'] ?? ''));
-                    if ($fn) $html .= '<p><strong>'.esc_html($fn).'</strong></p>';
-                    $street = trim(($addr['fullstreet'] ?? '').' '.($addr['houseNumber'] ?? ''));
-                    if ($street) $html .= '<p>'.esc_html($street).'</p>';
-                    $city = trim(($addr['postcode'] ?? '').' '.($addr['city'] ?? ''));
-                    if ($city) $html .= '<p>'.esc_html($city).'</p>';
-                    if (!empty($addr['country'])) $html .= '<p>'.esc_html($addr['country']).'</p>';
+                    $fn      = trim(($addr['firstName'] ?? '').' '.($addr['lastName'] ?? ''));
+                    $street  = trim(                ($addr['fullstreet'] ?? '').' '.($addr['houseNumber'] ?? ''));
+                    $city    = trim(($addr['postcode'] ?? '').' '.($addr['city'] ?? ''));
+                    $country = $addr['country'] ?? '';
+
+                    $html .= '<p>';
+                    if ($fn)      $html .= '<strong>'.esc_html($fn).'</strong><br>';
+                    if ($street)  $html .= esc_html($street).'<br>';
+                    if ($city)    $html .= esc_html($city).'<br>';
+                    if ($country) $html .= esc_html($country);
+                    $html .= '</p>';
                 } else {
                     $html .= '<p><em>Nog geen adresinformatie beschikbaar.</em></p>';
                 }
                 $html .=     '</div>';
 
                 // Datum & bezorgdienst
-                $html .=     '<div class="printcom-ot__panel">';
-                $html .=       '<h4>Datum & Bezorgdienst</h4>';
-                if ($date_big) {
-                    $html .=   '<div class="printcom-ot__dtbig">'.esc_html($date_big).'</div>';
-                    if ($date_small) $html .= '<div class="printcom-ot__dtsmall">'.esc_html($date_small).'</div>';
-                    if ($carrier_lbl) $html .= '<div class="printcom-ot__carrier">'.esc_html($carrier_lbl).'</div>';
-                } else {
-                    $html .=   '<p><em>Bezorgdatum nog niet bekend.</em></p>';
+                $html .= '<div class="printcom-ot__panel">';
+
+                // Vervoerder + methode
+                if ($carrier_lbl) {
+                    $method = $dw['method'] ?? $carrier_lbl; // fallback
+                    $cinfo  = $this->carrier_logo_and_label((string)$method);
+
+                    $html .= '<h4>Je pakket wordt bezorgd door</h4>';
+                    $html .= '<div class="printcom-ot__carrier-row">';
+                    if (!empty($cinfo['url'])) {
+                        $html .= '<img src="'.esc_url($cinfo['url']).'" alt="'.esc_attr($cinfo['name']).'" class="printcom-ot__carrier-logo" />';
+                    }
+                    $html .= '<span>'.esc_html($cinfo['name']).'</span>';
+                    $html .= '</div>';
                 }
-                $html .=     '</div>';
+
+                // Verwachte levering
+                if ($date_big) {
+                    $html .= '<h4>Verwachte levering</h4>';
+                    if ($date_small) {
+                        $html .= '<p>'.esc_html($date_big).' tot '.esc_html($date_small).'</p>';
+                    } else {
+                        $html .= '<p>'.esc_html($date_big).'</p>';
+                    }
+                } else {
+                    $html .= '<p><em>Bezorgdatum nog niet bekend.</em></p>';
+                }
+
+                $html .= '</div>';
 
                 // Track & Trace knop / placeholder
                 $html .=     '<div class="printcom-ot__panel" style="text-align:center">'.$btn_html.'</div>';
@@ -894,7 +917,29 @@ class Printcom_Order_Tracker {
         if (strpos($m,'dpd')!==false)                              return 'DPD';
         if (strpos($m,'gls')!==false)                              return 'GLS';
         if (strpos($m,'ups')!==false)                              return 'UPS';
-        return ucfirst($method ?: 'Bezorger');
+        return ucfirst($method ?: 'Bezorgdienst nog niet bekend');
+    }
+
+    private function carrier_logo_and_label(string $method): array {
+        $name = $this->carrier_label_from_method($method);
+        $slug = strtolower($name);
+
+        $map = [
+            'postnl' => 'postnl.png',
+            'dhl'    => 'dhl.png',
+            'dpd'    => 'dpd.png',
+            'gls'    => 'gls.png',
+            'ups'    => 'ups.png',
+        ];
+
+        $file = $map[$slug] ?? 'onbekend.png';
+        $url  = plugins_url('assets/carriers/'.$file, __FILE__);
+
+        return [
+            'name' => $name,
+            'url'  => $url,
+            'slug' => $slug,
+        ];
     }
 
     /**
@@ -951,6 +996,8 @@ class Printcom_Order_Tracker {
         .printcom-ot__dtbig{color:#232323;font-size:1.2rem;font-weight:700;margin:.2rem 0}
         .printcom-ot__dtsmall{color:#232323;margin:.1rem 0}
         .printcom-ot__carrier{color:#232323;font-weight:600}
+        .printcom-ot__carrier-row{display:flex;align-items:center;gap:8px;margin:4px 0}
+        .printcom-ot__carrier-logo{height:20px;width:auto;display:inline-block}
 
         /* Knoppen */
         .btn{display:inline-block;padding:12px 16px;border-radius:12px;text-decoration:none;border:1px solid #ddd}
