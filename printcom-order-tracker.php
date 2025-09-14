@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     1.8.27
+ * Version:     1.9.0
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -498,9 +498,8 @@ class Printcom_Order_Tracker {
                     $html .= '</ul>';
                 }
                 if ($extra) {
-                    $html .= '<h4>Extra&#39;s</h4><ul>';
-                    foreach ($extra as $ln) $html .= '<li>'.esc_html($ln).'</li>';
-                    $html .= '</ul>';
+                    $html .= '<h4>Extra&#39;s</h4>';
+                    $html .= '<p>'.esc_html(implode(', ', $extra)).'</p>';
                 }
                 $html .=     '</div>';
                 $html .=   '</div>';
@@ -559,7 +558,7 @@ class Printcom_Order_Tracker {
                 $html .= '</div>';
 
                 // Track & Trace knop / placeholder
-                $html .=     '<div class="printcom-ot__panel" style="text-align:center">'.$btn_html.'</div>';
+                $html .=     '<div class="printcom-ot__panel printcom-ot__panel--track">'.$btn_html.'</div>';
 
                 $html .=   '</div>'; // delivery col
 
@@ -1130,10 +1129,11 @@ class Printcom_Order_Tracker {
         .printcom-ot__muted{color:#777}
 
         /* ====== NIEUWE ITEM LAYOUT ====== */
-        .printcom-ot__item{display:block;border:1px solid #eee;border-radius:16px;background:#ffffff;padding:18px;margin:18px 0}
+        .printcom-ot__item{display:block;border:1px solid #eee;border-radius:16px;background:#ffffff;padding:18px;margin:18px auto;width:100%;max-width:1100px;}
         .printcom-ot__item-grid{display:grid;grid-template-columns:300px 1fr 400px;gap:20px;align-items:start}
         @media(max-width:1200px){ .printcom-ot__item-grid{grid-template-columns:250px 1fr} }
         @media(max-width:900px){ .printcom-ot__item-grid{grid-template-columns:1fr} }
+        .printcom-ot__items{display:flex;flex-direction:column;align-items:center;}
 
         .printcom-ot__photo{background:#fafafa;border-radius:14px;padding:16px;box-shadow:0 1px 0 rgba(0,0,0,.03)}
         .printcom-ot__title{font-size:1.8rem;font-weight:800;margin:0}
@@ -1153,13 +1153,25 @@ class Printcom_Order_Tracker {
         .printcom-ot__badge--geannuleerd{background:#dc3545}
         .printcom-ot__badge--onbekend{background:#adb5bd}
 
+        /* Desktop / tablet = badge rechtsboven */
+        .printcom-ot__badge-top{position:absolute;right:18px;top:18px}
+
+        /* Mobiel: badge onder de titel */
+        @media(max-width:600px){.printcom-ot__badge-top{position:static;display:inline-block;margin-top:6px}.printcom-ot__item-header{display:flex;flex-direction:column;align-items:flex-start}}
+
         .printcom-ot__panel{background:#fff;border:1px solid #eee;border-radius:14px;padding:14px}
-        .printcom-ot__panel h4{coloc:#232323:margin:.2rem 0 8px}
+        .printcom-ot__panel h4{color:#232323:margin:.2rem 0 8px}
         .printcom-ot__panel p{color:#232323;margin:.2rem 0}
+        
+        /* Track & Trace paneel speciaal stylen */
+        .printcom-ot__panel--track {background: none;border: none;padding: 0;text-align: right;}
+
+        /* Mobiel: centreren */
+        @media (max-width: 900px) { .printcom-ot__panel--track {text-align: center;}}
 
         .printcom-ot__specs h4{color:#B71C1C}
-        .printcom-ot__specs ul{margin:.2rem 0 0 1.2rem}
-        .printcom-ot__specs li{margin:.2rem 0}
+        .printcom-ot__specs ul {list-style: none;margin: .2rem 0 0;padding-left: 0;}
+        .printcom-ot__specs li {margin: .2rem 0;}
 
         .printcom-ot__delivery{display:flex;flex-direction:column;gap:16px}
         .printcom-ot__dtbig{color:#232323;font-size:1.2rem;font-weight:700;margin:.2rem 0}
