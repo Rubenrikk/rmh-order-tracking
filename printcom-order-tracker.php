@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     1.8.18
+ * Version:     1.8.19
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -178,24 +178,27 @@ class Printcom_Order_Tracker {
             <?php if ($m): ?>
                 <table class="widefat striped"><thead><tr><th>Ordernummer</th><th>Pagina</th><th>Link</th><th>Acties</th></tr></thead><tbody>
                 <?php foreach($m as $ord=>$pid):
-                    $link=get_permalink($pid); $title=get_the_title($pid);
+                    $link  = get_permalink($pid);
+                    $title = get_the_title($pid);
+
+                    // ÉÉN knop: mapping + pagina verwijderen (pid meesturen!)
                     $del = wp_nonce_url(
-                        admin_url('admin-post.php?action=printcom_ot_delete_order&order=' . rawurlencode($ord) . '&hard=1'),
+                        admin_url('admin-post.php?action=printcom_ot_delete_order&order=' . rawurlencode($ord) . '&pid='.(int)$pid.'&hard=1'),
                         'printcom_ot_delete_order_' . $ord
                     );
-                    ?>
-                    <tr>
-                      <td><?php echo esc_html($ord); ?></td>
-                    <td><?php echo esc_html($title); ?> (ID: <?php echo (int)$pid; ?>)</td>
-                      <td><a href="<?php echo esc_url($link); ?>" target="_blank" rel="noopener"><?php echo esc_html($link); ?></a></td>
-                    <td>
-                        <a class="button button-link-delete"
-                            href="<?php echo esc_url($del); ?>"
-                           onclick="return confirm('Weet je zeker dat je deze order én de gekoppelde pagina definitief wilt verwijderen? Dit kan niet ongedaan worden gemaakt.');">
-                           Verwijder uit lijst + pagina
-                        </a>
-                      </td>
-                    </tr>
+                ?>
+                <tr>
+                  <td><?php echo esc_html($ord); ?></td>
+                  <td><?php echo esc_html($title); ?> (ID: <?php echo (int)$pid; ?>)</td>
+                  <td><a href="<?php echo esc_url($link); ?>" target="_blank" rel="noopener"><?php echo esc_html($link); ?></a></td>
+                  <td>
+                    <a class="button button-link-delete"
+                       href="<?php echo esc_url($del); ?>"
+                       onclick="return confirm('Weet je zeker dat je deze order én de gekoppelde pagina definitief wilt verwijderen? Dit kan niet ongedaan worden gemaakt.');">
+                       Verwijder uit lijst + pagina
+                    </a>
+                  </td>
+                </tr>
                 <?php endforeach; ?></tbody></table>
             <?php else: ?><p>Nog geen orderpagina’s aangemaakt.</p><?php endif; ?>
         </div>
@@ -301,36 +304,45 @@ class Printcom_Order_Tracker {
         $order = isset($_GET['order']) ? sanitize_text_field(wp_unslash($_GET['order'])) : '';
         if ($order === '') wp_die('Order ontbreekt.', 400);
 
-        // Fixed nonce key (no suffix)
+        // vaste nonce
         $nonce_key = 'printcom_ot_delete_order_' . $order;
         if (empty($_GET['_wpnonce']) || !wp_verify_nonce(sanitize_text_field(wp_unslash($_GET['_wpnonce'])), $nonce_key)) {
             wp_die('Nonce invalid', 403);
         }
 
         $hard = isset($_GET['hard']) && (string)$_GET['hard'] === '1';
+        $pid_param = isset($_GET['pid']) ? (int) $_GET['pid'] : 0;
 
-        // Resolve page id before removing the mapping
+        // Lees actuele mapping
         $mappings = get_option(self::OPT_MAPPINGS, []);
-        $pid = isset($mappings[$order]) ? (int)$mappings[$order] : 0;
+        $mapped_pid = isset($mappings[$order]) ? (int)$mappings[$order] : 0;
 
-        $page_deleted = false;
-        if ($hard && $pid > 0) {
-            // Try hard delete page first
-            wp_delete_post($pid, true); // force delete (no trash)
-            $page_deleted = (get_post($pid) === null); // if null, it's gone
+        // Kies welke PID we mogen verwijderen:
+        // - Als pid param == mapping pid, dan die gebruiken (voorkomt verkeerde delete)
+        // - Anders, als mapping bestaat, gebruik mapping
+        // - Anders 0 (niets te verwijderen)
+        $pid_to_delete = 0;
+        if ($hard) {
+            if ($pid_param > 0 && $mapped_pid > 0 && $pid_param === $mapped_pid) {
+                $pid_to_delete = $pid_param;
+            } elseif ($mapped_pid > 0) {
+                $pid_to_delete = $mapped_pid;
+            }
+            if ($pid_to_delete > 0) {
+                wp_delete_post($pid_to_delete, true); // force delete
+            }
         }
 
-        // Now remove only the mapping/state/transient (do NOT try to delete again inside)
+        // Verwijder alleen de mapping/state (pagina is hierboven al verwijderd indien nodig)
         $this->remove_order_mapping($order, false);
 
-        // Build message
+        // Feedback
         $dest = admin_url('options-general.php?page=printcom-ot');
-        $args = [
+        $dest = add_query_arg([
             'printcom_deleted_order' => rawurlencode($order),
-            'page_deleted'           => $page_deleted ? '1' : '0',
-            'pid'                    => (string)$pid,
-        ];
-        $dest = add_query_arg($args, $dest);
+            'page_deleted'           => $pid_to_delete > 0 ? '1' : '0',
+            'pid'                    => (string)$pid_to_delete,
+        ], $dest);
         wp_safe_redirect($dest);
         exit;
     }
