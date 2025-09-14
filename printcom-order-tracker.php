@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     1.8.3
+ * Version:     1.8.4
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -178,46 +178,64 @@ class Printcom_Order_Tracker {
     }
 
     private function create_or_update_page_for_order($orderNum) {
-        $mappings=get_option(self::OPT_MAPPINGS,[]);
-        $title='Bestelling '.$orderNum;
-        $shortcode=sprintf('[print_order_status order="%s"]',esc_attr($orderNum));
+        $mappings = get_option(self::OPT_MAPPINGS, []);
+        $title    = 'Bestelling '.$orderNum;
+        $shortcode= sprintf('[print_order_status order="%s"]', esc_attr($orderNum));
 
-        // probeer Divi fullwidth template te detecteren
-        $divi_full_tpl = locate_template('et_full_width_page.php'); // Divi
-        $blank_tpl     = locate_template('page-template-blank.php'); // soms Divi blank
+        // (optioneel) template-detectie – mag blijven staan
+        $divi_full_tpl = locate_template('et_full_width_page.php');      // Divi
+        $blank_tpl     = locate_template('page-template-blank.php');     // soms Divi blank
 
         if (isset($mappings[$orderNum]) && get_post_status((int)$mappings[$orderNum])) {
-            $page_id=(int)$mappings[$orderNum];
-            $update=['ID'=>$page_id,'post_title'=>$title];
-            $cur=get_post($page_id);
-            if ($cur && strpos($cur->post_content,'[print_order_status')===false) {
-                $update['post_content']=$cur->post_content."\n\n".$shortcode;
+            // BESTOND AL → bijwerken
+            $page_id = (int)$mappings[$orderNum];
+
+            $update = [
+                'ID'         => $page_id,
+                'post_title' => $title,
+            ];
+            $cur = get_post($page_id);
+            if ($cur && strpos($cur->post_content, '[print_order_status') === false) {
+                $update['post_content'] = $cur->post_content."\n\n".$shortcode;
             }
             wp_update_post($update);
 
-            // (optioneel) zet template als nog niet gezet
+            // Forceer Divi: Geen zijbalk
+            $this->apply_divi_no_sidebar_layout($page_id);
+
+            // (optioneel) ook een template forceren
             if ($divi_full_tpl || $blank_tpl) {
                 $tpl = $divi_full_tpl ? 'et_full_width_page.php' : 'page-template-blank.php';
                 if (get_post_meta($page_id, '_wp_page_template', true) !== $tpl) {
                     update_post_meta($page_id, '_wp_page_template', $tpl);
                 }
-            }
+            }   
+
         } else {
+            // BESTOND NIET → aanmaken
             $page_id = wp_insert_post([
-                'post_title'=>$title,
-                'post_name'=>sanitize_title($title),
-                'post_content'=>$shortcode,
-                'post_status'=>'publish',
-                'post_type'=>'page',
-                'post_author'=>get_current_user_id()
+                'post_title'   => $title,
+                'post_name'    => sanitize_title($title),
+                'post_content' => $shortcode,
+                'post_status'  => 'publish',
+                'post_type'    => 'page',
+                'post_author'  => get_current_user_id(),
             ]);
             if (is_wp_error($page_id) || !$page_id) return false;
-            $mappings[$orderNum]=(int)$page_id; update_option(self::OPT_MAPPINGS,$mappings,false);
 
+            // Map opslaan
+            $mappings[$orderNum] = (int)$page_id;
+            update_option(self::OPT_MAPPINGS, $mappings, false);
+
+            // Forceer Divi: Geen zijbalk
+            $this->apply_divi_no_sidebar_layout((int)$page_id);
+
+            // (optioneel) ook een template forceren
             if ($divi_full_tpl || $blank_tpl) {
                 update_post_meta($page_id, '_wp_page_template', $divi_full_tpl ? 'et_full_width_page.php' : 'page-template-blank.php');
             }
         }
+
         return (int)$page_id;
     }
 
@@ -879,6 +897,19 @@ class Printcom_Order_Tracker {
         return ucfirst($method ?: 'Bezorger');
     }
 
+    /**
+     * Forceer voor Divi: Pagina Layout = Geen zijbalk
+     */
+    private function apply_divi_no_sidebar_layout(int $page_id): void {
+        if ($page_id <= 0) return;
+
+        // Zet Divi paginalayout op "Geen zijbalk"
+        update_post_meta($page_id, 'et_pb_page_layout', 'et_no_sidebar');
+
+        // (optioneel) als je tóch het Divi full-width template wilt:
+        // update_post_meta($page_id, '_wp_page_template', 'et_full_width_page.php');
+    }
+
     /* ===== Styles ===== */
 
     public function enqueue_styles() {
@@ -897,34 +928,34 @@ class Printcom_Order_Tracker {
         .printcom-ot__muted{color:#777}
 
         /* ====== NIEUWE ITEM LAYOUT ====== */
-        .printcom-ot__item{display:block;border:1px solid #eee;border-radius:16px;background:#fafafa;padding:18px;margin:18px 0}
+        .printcom-ot__item{display:block;border:1px solid #eee;border-radius:16px;background:#ffffff;padding:18px;margin:18px 0}
         .printcom-ot__item-grid{display:grid;grid-template-columns:300px 1fr 400px;gap:20px;align-items:start}
         @media(max-width:1200px){ .printcom-ot__item-grid{grid-template-columns:250px 1fr} }
         @media(max-width:900px){ .printcom-ot__item-grid{grid-template-columns:1fr} }
 
-        .printcom-ot__photo{background:#fff;border-radius:14px;padding:16px;box-shadow:0 1px 0 rgba(0,0,0,.03)}
+        .printcom-ot__photo{background:#fafafa;border-radius:14px;padding:16px;box-shadow:0 1px 0 rgba(0,0,0,.03)}
         .printcom-ot__title{font-size:1.8rem;font-weight:800;margin:0}
-        .printcom-ot__sub{color:#2f7f8f;font-weight:700;margin:.3rem 0 1rem}
+        .printcom-ot__sub{color:#E53935;font-weight:700;margin:.3rem 0 1rem}
         .printcom-ot__badge-top{position:absolute;right:18px;top:18px}
         .printcom-ot__item-header{position:relative;margin-bottom:.5rem}
 
         .printcom-ot__panel{background:#fff;border:1px solid #eee;border-radius:14px;padding:14px}
-        .printcom-ot__panel h4{margin:.2rem 0 8px}
-        .printcom-ot__panel p{margin:.2rem 0}
+        .printcom-ot__panel h4{coloc:#232323:margin:.2rem 0 8px}
+        .printcom-ot__panel p{color:#232323;margin:.2rem 0}
 
-        .printcom-ot__specs h4{color:#2f7f8f}
+        .printcom-ot__specs h4{color:#24325F}
         .printcom-ot__specs ul{margin:.2rem 0 0 1.2rem}
         .printcom-ot__specs li{margin:.2rem 0}
 
         .printcom-ot__delivery{display:flex;flex-direction:column;gap:16px}
-        .printcom-ot__dtbig{font-size:1.2rem;font-weight:700;margin:.2rem 0}
-        .printcom-ot__dtsmall{color:#666;margin:.1rem 0}
-        .printcom-ot__carrier{color:#444;font-weight:600}
+        .printcom-ot__dtbig{color:#232323;font-size:1.2rem;font-weight:700;margin:.2rem 0}
+        .printcom-ot__dtsmall{color:#232323;margin:.1rem 0}
+        .printcom-ot__carrier{color:#232323;font-weight:600}
 
         /* Knoppen */
         .btn{display:inline-block;padding:12px 16px;border-radius:12px;text-decoration:none;border:1px solid #ddd}
-        .btn--track{background:#0B63C4;color:#fff;border-color:#0B63C4}
-        .btn--track[aria-disabled="true"]{background:#cbd5e1;border-color:#cbd5e1;color:#fff;cursor:not-allowed}
+        .btn--track{background:#E53935;color:#fff;border-color:#B71C1C}
+        .btn--track[aria-disabled="true"]{background:#E53935;border-color:#B71C1C;color:#fff;cursor:not-allowed}
         ';
 
         wp_register_style('printcom-ot-style', false);
