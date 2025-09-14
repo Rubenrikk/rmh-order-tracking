@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     1.8.17
+ * Version:     1.8.18
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -152,7 +152,16 @@ class Printcom_Order_Tracker {
             }
         }
         if (!empty($_GET['printcom_deleted_order'])) {
-            $od=sanitize_text_field(wp_unslash($_GET['printcom_deleted_order'])); $msg='Order <strong>'.esc_html($od).'</strong> en gekoppelde pagina zijn verwijderd.';
+            $od  = sanitize_text_field(wp_unslash($_GET['printcom_deleted_order']));
+            $pd  = isset($_GET['page_deleted']) && $_GET['page_deleted'] === '1';
+            $pid = isset($_GET['pid']) ? (int) $_GET['pid'] : 0;
+
+            if ($pd) {
+                $msg = 'Order <strong>'.esc_html($od).'</strong> en pagina (ID: '.(int)$pid.') zijn verwijderd.';
+            } else {
+                $msg = 'Order <strong>'.esc_html($od).'</strong> is uit de lijst verwijderd. '
+                     . 'Pagina (ID: '.(int)$pid.') kon niet worden verwijderd (bestond mogelijk al niet meer).';
+            }
         }
 
         $m = get_option(self::OPT_MAPPINGS, []);
@@ -292,24 +301,36 @@ class Printcom_Order_Tracker {
         $order = isset($_GET['order']) ? sanitize_text_field(wp_unslash($_GET['order'])) : '';
         if ($order === '') wp_die('Order ontbreekt.', 400);
 
-        // vaste nonce (géén suffix nodig)
+        // Fixed nonce key (no suffix)
         $nonce_key = 'printcom_ot_delete_order_' . $order;
         if (empty($_GET['_wpnonce']) || !wp_verify_nonce(sanitize_text_field(wp_unslash($_GET['_wpnonce'])), $nonce_key)) {
             wp_die('Nonce invalid', 403);
         }
 
-        // ✅ lees &hard=1 expliciet als string
         $hard = isset($_GET['hard']) && (string)$_GET['hard'] === '1';
 
-        // kleine log voor zekerheid
-        if (function_exists('error_log')) {
-            error_log('[printcom] admin_handle_delete_order order='.$order.' hard=' . ($hard ? '1' : '0'));
+        // Resolve page id before removing the mapping
+        $mappings = get_option(self::OPT_MAPPINGS, []);
+        $pid = isset($mappings[$order]) ? (int)$mappings[$order] : 0;
+
+        $page_deleted = false;
+        if ($hard && $pid > 0) {
+            // Try hard delete page first
+            wp_delete_post($pid, true); // force delete (no trash)
+            $page_deleted = (get_post($pid) === null); // if null, it's gone
         }
 
-        $ok = $this->remove_order_mapping($order, $hard);
+        // Now remove only the mapping/state/transient (do NOT try to delete again inside)
+        $this->remove_order_mapping($order, false);
 
+        // Build message
         $dest = admin_url('options-general.php?page=printcom-ot');
-        $dest = add_query_arg($ok ? 'printcom_deleted_order' : 'printcom_delete_failed', rawurlencode($order), $dest);
+        $args = [
+            'printcom_deleted_order' => rawurlencode($order),
+            'page_deleted'           => $page_deleted ? '1' : '0',
+            'pid'                    => (string)$pid,
+        ];
+        $dest = add_query_arg($args, $dest);
         wp_safe_redirect($dest);
         exit;
     }
