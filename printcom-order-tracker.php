@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     2.1.5
+ * Version:     2.1.6
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -401,17 +401,13 @@ class Printcom_Order_Tracker {
         $html .= '<h2 class="rmh-ol__title">Bestelling zoeken</h2>';
         $html .= '<div class="rmh-ol__feedback' . ($error ? ' rmh-ol__feedback--error' : '') . '" aria-live="polite">' . ($error ? esc_html($error) : '') . '</div>';
         $html .= '<form class="rmh-ol__form" method="post">';
-        $html .=   '<div class="rmh-ol__row">';
-        $html .=     '<div class="rmh-ol__field">';
-        $html .=       '<label class="rmh-ol__label" for="rmh_ol_order">Ordernummer <span aria-hidden="true">*</span></label>';
-        $html .=       '<input class="rmh-ol__input" type="text" id="rmh_ol_order" name="rmh_ol_order" placeholder="RMH-12345 of factuurnummer" required' . $order_attr . ' value="' . esc_attr($order_val) . '" />';
-        $html .=       '<p class="rmh-ol__hint">Bijv. RMH-12345 of factuurnummer</p>';
-        $html .=     '</div>';
-        $html .=     '<div class="rmh-ol__field">';
-        $html .=       '<label class="rmh-ol__label" for="rmh_ol_postcode">Postcode <span aria-hidden="true">*</span></label>';
-        $html .=       '<input class="rmh-ol__input" type="text" id="rmh_ol_postcode" name="rmh_ol_postcode" placeholder="1234AB, zonder spatie" pattern="^[0-9]{4}[A-Za-z]{2}$" required' . $postcode_attr . ' value="' . esc_attr($postcode_val_raw) . '" />';
-        $html .=       '<p class="rmh-ol__hint">1234AB, zonder spatie</p>';
-        $html .=     '</div>';
+        $html .=   '<div class="rmh-ol__field">';
+        $html .=     '<label class="rmh-ol__label" for="rmh_ol_order">Ordernummer <span aria-hidden="true">*</span></label>';
+        $html .=     '<input class="rmh-ol__input" type="text" id="rmh_ol_order" name="rmh_ol_order" placeholder="RMH-12345 / 1234" required' . $order_attr . ' value="' . esc_attr($order_val) . '" />';
+        $html .=   '</div>';
+        $html .=   '<div class="rmh-ol__field">';
+        $html .=     '<label class="rmh-ol__label" for="rmh_ol_postcode">Postcode <span aria-hidden="true">*</span></label>';
+        $html .=     '<input class="rmh-ol__input" type="text" id="rmh_ol_postcode" name="rmh_ol_postcode" placeholder="1234AB (zonder spatie)" pattern="^[0-9]{4}[A-Za-z]{2}$" required' . $postcode_attr . ' value="' . esc_attr($postcode_val_raw) . '" />';
         $html .=   '</div>';
         $html .=   '<div class="rmh-ol__actions"><button type="submit" class="rmh-ol__btn">Zoek bestelling</button></div>';
         $html .= '</form>';
