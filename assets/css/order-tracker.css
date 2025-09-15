@@ -1,0 +1,66 @@
+/* ===== Basis / layout ===== */
+.rmh-ot{border:0;padding:0}
+.rmh-ot--error{border:1px solid #f5c2c7;background:#f8d7da;padding:12px;border-radius:8px;color:#842029}
+.rmh-ot__items{display:flex;flex-direction:column;align-items:flex-start;}
+.rmh-ot__items h3{margin:10px 0;text-align:left!important;margin-left:0}
+.rmh-ot__grid{display:block!important}
+.rmh-ot__items::after{content:"";display:block;clear:both}
+.rmh-ot__item{display:block;border:1px solid #eee;border-radius:16px;background:#fff;padding:18px;margin:18px auto;width:100%;max-width:1100px}
+.rmh-ot__item-grid{display:grid;grid-template-columns:280px 2fr 1.5fr;gap:20px;align-items:start;}
+@media(max-width:1200px)and(min-width:901px){.rmh-ot__item-grid{grid-template-columns:200px 2fr 1.2fr;}}
+@media(max-width:900px){.rmh-ot__item-grid{grid-template-columns:1fr;}}
+
+/* Afbeelding & header */
+.rmh-ot__image{width:100%;height:auto;display:block}
+@media(max-width:1200px)and(min-width:901px){.rmh-ot__photo{max-width: 200px;}}
+.rmh-ot__title{font-size:1.8rem;font-weight:800;margin:0}
+.rmh-ot__sub{color:#E53935;font-weight:700;margin:.3rem 0 1rem}
+.rmh-ot__item-header{position:relative;margin-bottom:.5rem}
+.rmh-ot__badge-top{position:absolute;right:18px;top:18px} /* desktop/tablet */
+
+/* Mobiel: titel → orderregel → badge (gecentreerd onder elkaar) */
+@media(max-width:600px){
+  .rmh-ot__item-header{display:flex;flex-direction:column;text-align:center}
+  .rmh-ot__title{order:1;margin-bottom:2px!important;}
+  .rmh-ot__sub{order:2;margin-top:0!important;margin-bottom:4px!important;}
+  .rmh-ot__badge-top{order:3;position:static;display:inline-block;margin-top:4px;}
+}
+
+/* Status-badge kleuren (per product) */
+.rmh-ot__badge{display:inline-block;padding:6px 12px;border-radius:20px;font-size:.85rem;font-weight:600;color:#fff}
+.rmh-ot__badge--inproductie{background:#0B63C4}
+.rmh-ot__badge--behandelen{background:#6c757d}
+.rmh-ot__badge--verzonden{background:#198754}
+.rmh-ot__badge--deels{background:#ffc107;color:#000}
+.rmh-ot__badge--bezorgd{background:#28a745}
+.rmh-ot__badge--geannuleerd{background:#dc3545}
+.rmh-ot__badge--onbekend{background:#adb5bd}
+
+/* Panels */
+.rmh-ot__panel{background:#fff;border:1px solid #eee;border-radius:14px;padding:14px}
+.rmh-ot__panel h4{color:#232323;margin:.2rem 0 8px}
+.rmh-ot__panel p{color:#232323;margin:.2rem 0}
+
+/* Specs: bullets uit, tekstkleur gelijk aan Extra’s */
+.rmh-ot__specs h4{color:#B71C1C}
+.rmh-ot__specs ul{list-style:none!important;margin:.2rem 0 0!important;padding-left:0!important}
+.rmh-ot__specs li,.rmh-ot__specs p{margin:.2rem 0;padding-left:0;color:#232323;font-size:1rem;line-height:1.5;letter-spacing:normal;font-family:inherit;font-weight:400}
+.rmh-ot__specs p{display:inline}
+
+/* Delivery kolom + vervoerder */
+.rmh-ot__delivery{display:flex;flex-direction:column;gap:16px}
+.rmh-ot__dtbig{color:#232323;font-size:1.2rem;font-weight:700;margin:.2rem 0}
+.rmh-ot__dtsmall{color:#232323;margin:.1rem 0}
+.rmh-ot__carrier{color:#232323;font-weight:600}
+.rmh-ot__carrier-row{display:flex;align-items:center;gap:8px;margin:4px 0}
+.rmh-ot__carrier-logo{height:50px;width:auto;display:inline-block}
+
+/* Track & Trace paneel: rechts op desktop, center op mobiel */
+.rmh-ot__panel--track{text-align:right;background:none;border:none;padding:0}
+@media(max-width:900px){.rmh-ot__panel--track{text-align:center}}
+
+/* Knoppen */
+.btn{display:inline-block;padding:12px 16px;border-radius:12px;text-decoration:none;border:1px solid #ddd}
+.btn--track{background:#E53935;color:#fff;border-color:#B71C1C}
+.btn--track[aria-disabled="true"]{background:#ffcdd2;border-color:#ef9a9a;color:#B71C1C;cursor:not-allowed}
+
