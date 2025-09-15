@@ -31,7 +31,7 @@
 /* Mobiel: titel → badge (gecentreerd onder elkaar) */
 @media(max-width:600px){
   .rmh-ot__item-header{display:flex;flex-direction:column;text-align:center}
-  .rmh-ot__badge-top{order:1;position:static;display:inline-block;margin-bottom:4px;}
+  .rmh-ot__badge-top{order:1;position:static;display:inline-block;margin-bottom:5px;}
   .rmh-ot__title{order:2;margin-top:2px!important;}
 }
 
