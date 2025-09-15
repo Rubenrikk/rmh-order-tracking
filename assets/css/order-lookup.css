@@ -9,6 +9,7 @@
 
 .rmh-order-lookup .rmh-ol__title {
     margin-top: 0;
+    margin-bottom: 24px;
     text-align: center;
     font-weight: 700;
     font-size: 2rem;
@@ -50,6 +51,7 @@
 
 .rmh-order-lookup .rmh-ol__label {
     font-weight: 700;
+    font-size: 1.125rem;
     margin-bottom: 4px;
 }
 
