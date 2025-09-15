@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     1.9.10
+ * Version:     2.0.0
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -37,8 +37,6 @@ class Printcom_Order_Tracker {
         add_filter('body_class',      [$this, 'force_divi_body_classes_for_orders']);
         add_action('printcom_ot_cron_refresh_token', [$this, 'cron_refresh_token']);
         add_action('printcom_ot_cron_warm_cache',   [$this, 'cron_warm_cache']);
-
-        add_action('http_api_curl', [$this, 'maybe_force_ipv4_for_printcom'], 10, 3);
     }
 
     /* ===== Activatie/Deactivatie ===== */
@@ -85,8 +83,6 @@ class Printcom_Order_Tracker {
         $add('username','Username',sprintf('<input type="text" name="%s[username]" value="%s" class="regular-text"/>',esc_attr(self::OPT_SETTINGS),esc_attr($s['username']??'')));
         $add('password','Password',sprintf('<input type="password" name="%s[password]" value="%s" class="regular-text"/>',esc_attr(self::OPT_SETTINGS),esc_attr($s['password']??'')));
         $add('default_cache_ttl','Cache (minuten)',sprintf('<input type="number" min="0" step="1" name="%s[default_cache_ttl]" value="%d" class="small-text"/>',esc_attr(self::OPT_SETTINGS),isset($s['default_cache_ttl'])?(int)$s['default_cache_ttl']:5),'HOT=5m, COLD=24u.');
-        $add('force_ipv4','Forceer IPv4 (debug)',sprintf('<label><input type="checkbox" name="%s[force_ipv4]" value="1" %s/> Alleen api.print.com</label>',esc_attr(self::OPT_SETTINGS),checked(!empty($s['force_ipv4']),true,false)));
-        $add('alt_payload','Alternatieve payload (debug)',sprintf('<label><input type="checkbox" name="%s[alt_payload]" value="1" %s/> POST zonder <code>{"credentials":...}</code></label>',esc_attr(self::OPT_SETTINGS),checked(!empty($s['alt_payload']),true,false)));
     }
 
     public function sanitize_settings($in){
@@ -99,8 +95,6 @@ class Printcom_Order_Tracker {
         $o['username']=trim(sanitize_text_field($in['username']??''));
         $o['password']=trim((string)($in['password']??''));
         $o['default_cache_ttl']=max(0,(int)($in['default_cache_ttl']??5));
-        $o['force_ipv4']=!empty($in['force_ipv4'])?1:0;
-        $o['alt_payload']=!empty($in['alt_payload'])?1:0;
         return $o;
     }
 
@@ -148,15 +142,23 @@ class Printcom_Order_Tracker {
         // Wees-mappings opruimen
         $m = get_option(self::OPT_MAPPINGS, []);
         $chg=false;
-        foreach($m as $ord=>$pid){ if(!$pid || !get_post_status((int)$pid)){ unset($m[$ord]); delete_transient(self::TRANSIENT_PREFIX.md5($ord)); $st=get_option(self::OPT_STATE,[]); if(isset($st[$ord])){unset($st[$ord]); update_option(self::OPT_STATE,$st,false);} $chg=true; } }
+        foreach($m as $own=>$info){
+            $pid=(int)($info['page_id']??0); $print=$info['print_order']??'';
+            if(!$pid || !get_post_status($pid)){
+                unset($m[$own]);
+                if($print){ delete_transient(self::TRANSIENT_PREFIX.md5($print)); $st=get_option(self::OPT_STATE,[]); if(isset($st[$print])){unset($st[$print]); update_option(self::OPT_STATE,$st,false);} }
+                $chg=true;
+            }
+        }
         if($chg) update_option(self::OPT_MAPPINGS,$m,false);
 
         $msg='';
-        if (!empty($_POST['printcom_ot_new_order']) && check_admin_referer('printcom_ot_new_order_action','printcom_ot_nonce')) {
-            $orderNum=sanitize_text_field($_POST['printcom_ot_new_order']);
-            if ($orderNum!=='') {
-                $page_id=$this->create_or_update_page_for_order($orderNum);
-                if ($page_id){ $url=get_permalink($page_id); $msg=sprintf('Pagina voor order <strong>%s</strong> is aangemaakt/bijgewerkt: <a href="%s" target="_blank" rel="noopener">%s</a>',esc_html($orderNum),esc_url($url),esc_html($url)); }
+        if (!empty($_POST['rmh_ot_my_order']) && !empty($_POST['rmh_ot_print_order']) && check_admin_referer('printcom_ot_new_order_action','printcom_ot_nonce')) {
+            $my=sanitize_text_field($_POST['rmh_ot_my_order']);
+            $print=sanitize_text_field($_POST['rmh_ot_print_order']);
+            if ($my!=='' && $print!=='') {
+                $res=$this->create_or_update_page_for_order($my,$print);
+                if ($res){ [$page_id,$token]=$res; $url=add_query_arg('token',rawurlencode($token),get_permalink($page_id)); $msg=sprintf('Pagina voor order <strong>%s</strong> is aangemaakt/bijgewerkt: <a href="%s" target="_blank" rel="noopener">%s</a>',esc_html($my),esc_url($url),esc_html($url)); }
                 else { $msg='Er ging iets mis bij het aanmaken of bijwerken van de pagina.'; }
             }
         }
@@ -172,26 +174,32 @@ class Printcom_Order_Tracker {
             <?php if ($msg): ?><div class="notice notice-success"><p><?php echo wp_kses_post($msg); ?></p></div><?php endif; ?>
             <form method="post">
                 <?php wp_nonce_field('printcom_ot_new_order_action','printcom_ot_nonce'); ?>
-                <table class="form-table"><tr><th><label for="printcom_ot_new_order">Ordernummer</label></th><td><input type="text" id="printcom_ot_new_order" name="printcom_ot_new_order" class="regular-text" placeholder="bijv. 6001831441" required/><p class="description">Voer een ordernummer in en klik “Pagina aanmaken/bijwerken”.</p></td></tr></table>
+                <table class="form-table">
+                    <tr><th><label for="rmh_ot_my_order">Eigen ordernummer</label></th><td><input type="text" id="rmh_ot_my_order" name="rmh_ot_my_order" class="regular-text" required/></td></tr>
+                    <tr><th><label for="rmh_ot_print_order">Print.com ordernummer</label></th><td><input type="text" id="rmh_ot_print_order" name="rmh_ot_print_order" class="regular-text" required/><p class="description">Koppel jouw ordernummer aan een Print.com order.</p></td></tr>
+                </table>
                 <?php submit_button('Pagina aanmaken/bijwerken'); ?>
             </form>
             <h2>Bestaande orderpagina’s</h2>
             <?php if ($m): ?>
-                <table class="widefat striped"><thead><tr><th>Ordernummer</th><th>Pagina</th><th>Link</th><th>Acties</th></tr></thead><tbody>
-                <?php foreach($m as $ord=>$pid):
-                    $link  = get_permalink($pid);
-                    $title = get_the_title($pid);
+                <table class="widefat striped"><thead><tr><th>Eigen nummer</th><th>Print.com nummer</th><th>Pagina</th><th>Link</th><th>Acties</th></tr></thead><tbody>
+                <?php foreach($m as $own=>$info):
+                    $pid   = (int)($info['page_id']??0);
+                    $print = $info['print_order']??'';
+                    $token = $info['token']??'';
+                    $link  = $pid ? add_query_arg('token',rawurlencode($token),get_permalink($pid)) : '';
+                    $title = $pid ? get_the_title($pid) : '';
 
-                    // Één knop: mapping + pagina verwijderen — PID meesturen
                     $del = wp_nonce_url(
-                        admin_url('admin-post.php?action=printcom_ot_delete_order&order='.rawurlencode($ord).'&pid='.(int)$pid.'&hard=1'),
-                        'printcom_ot_delete_order_'.$ord
+                        admin_url('admin-post.php?action=printcom_ot_delete_order&order='.rawurlencode($own).'&hard=1'),
+                        'printcom_ot_delete_order_'.$own
                     );
                 ?>
                 <tr>
-                  <td><?php echo esc_html($ord); ?></td>
+                  <td><?php echo esc_html($own); ?></td>
+                  <td><?php echo esc_html($print); ?></td>
                   <td><?php echo esc_html($title); ?> (ID: <?php echo (int)$pid; ?>)</td>
-                  <td><a href="<?php echo esc_url($link); ?>" target="_blank" rel="noopener"><?php echo esc_html($link); ?></a></td>
+                  <td><?php if($link): ?><a href="<?php echo esc_url($link); ?>" target="_blank" rel="noopener"><?php echo esc_html($link); ?></a><?php endif; ?></td>
                   <td>
                     <a class="button button-link-delete"
                        href="<?php echo esc_url($del); ?>"
@@ -206,83 +214,83 @@ class Printcom_Order_Tracker {
         <?php
     }
 
-    private function create_or_update_page_for_order($orderNum) {
+    private function create_or_update_page_for_order(string $ownOrder, string $printOrder) {
         $mappings = get_option(self::OPT_MAPPINGS, []);
-        $title    = 'Bestelling '.$orderNum;
-        $shortcode= sprintf('[print_order_status order="%s"]', esc_attr($orderNum));
+        $title    = 'Bestelling '.$ownOrder;
+        $shortcode= sprintf('[print_order_status order="%s"]', esc_attr($ownOrder));
 
-        if (isset($mappings[$orderNum]) && get_post_status((int)$mappings[$orderNum])) {
-            // BESTOND AL → bijwerken
-            $page_id = (int)$mappings[$orderNum];
+        $parent_id = 0;
+        $parent = get_page_by_path('bestellingen');
+        if ($parent) { $parent_id = (int)$parent->ID; }
+        else {
+            $parent_id = wp_insert_post([
+                'post_title' => 'Bestellingen',
+                'post_name'  => 'bestellingen',
+                'post_status'=> 'publish',
+                'post_type'  => 'page',
+                'post_author'=> get_current_user_id(),
+            ]);
+            if (is_wp_error($parent_id)) $parent_id = 0; else $parent_id = (int)$parent_id;
+        }
 
+        $token = $mappings[$ownOrder]['token'] ?? wp_generate_password(20,false,false);
+
+        if (isset($mappings[$ownOrder]) && get_post_status((int)$mappings[$ownOrder]['page_id'])) {
+            $page_id = (int)$mappings[$ownOrder]['page_id'];
             $update = [
                 'ID'         => $page_id,
                 'post_title' => $title,
+                'post_name'  => sanitize_title($ownOrder),
+                'post_parent'=> $parent_id,
             ];
             $cur = get_post($page_id);
             if ($cur && strpos($cur->post_content, '[print_order_status') === false) {
                 $update['post_content'] = $cur->post_content . "\n\n" . $shortcode;
             }
             wp_update_post($update);
-
-            // Forceer Divi: full-width + geen zijbalk
-            $this->apply_divi_fullwidth_no_sidebar($page_id);
-
         } else {
-            // BESTOND NIET → aanmaken
             $page_id = wp_insert_post([
                 'post_title'   => $title,
-                'post_name'    => sanitize_title($title),
+                'post_name'    => sanitize_title($ownOrder),
                 'post_content' => $shortcode,
                 'post_status'  => 'publish',
                 'post_type'    => 'page',
+                'post_parent'  => $parent_id,
                 'post_author'  => get_current_user_id(),
-                // ✨ meteen goed zetten:
                 'meta_input'   => [
                     '_wp_page_template' => 'et_full_width_page.php',
-                    'et_pb_page_layout' => 'et_no_sidebar', // Geen zijbalk
+                    'et_pb_page_layout' => 'et_no_sidebar',
                 ],
             ]);
-
             if (is_wp_error($page_id) || !$page_id) return false;
-
-            // Map opslaan
-            $mappings[$orderNum] = (int)$page_id;
-            update_option(self::OPT_MAPPINGS, $mappings, false);
-
-            // Forceer Divi: full-width + geen zijbalk
-            $this->apply_divi_fullwidth_no_sidebar((int)$page_id);
         }
 
-        return (int)$page_id;
+        $mappings[$ownOrder] = ['page_id'=>(int)$page_id,'print_order'=>$printOrder,'token'=>$token];
+        update_option(self::OPT_MAPPINGS, $mappings, false);
+
+        $this->apply_divi_fullwidth_no_sidebar((int)$page_id);
+        return [(int)$page_id,$token];
     }
 
-    private function remove_order_mapping(string $orderNum, bool $also_delete_page=false): bool {
+    private function remove_order_mapping(string $ownOrder, bool $also_delete_page=false): bool {
         $m = get_option(self::OPT_MAPPINGS, []);
-        if (!isset($m[$orderNum])) return false;
+        if (!isset($m[$ownOrder])) return false;
 
-        $pid = (int)$m[$orderNum];
+        $info = $m[$ownOrder];
+        $pid = (int)($info['page_id']??0);
+        $print = $info['print_order']??'';
 
-        // 🔴 Force delete: niet afhankelijk van get_post_status()
         if ($also_delete_page && $pid > 0) {
-            // eenmalige log (kijk in error_log)
-            if (function_exists('error_log')) {
-                error_log('[printcom] delete request for order '.$orderNum.' (pid '.$pid.'), hard=' . ($also_delete_page ? '1' : '0'));
-            }
-            // force delete, ook als post in trash / of status niet geladen
             wp_delete_post($pid, true);
         }
 
-        // verwijder mapping + caches/state
-        unset($m[$orderNum]);
+        unset($m[$ownOrder]);
         update_option(self::OPT_MAPPINGS, $m, false);
 
-        delete_transient(self::TRANSIENT_PREFIX.md5($orderNum));
-
-        $st = get_option(self::OPT_STATE, []);
-        if (isset($st[$orderNum])) {
-            unset($st[$orderNum]);
-            update_option(self::OPT_STATE, $st, false);
+        if ($print) {
+            delete_transient(self::TRANSIENT_PREFIX.md5($print));
+            $st = get_option(self::OPT_STATE, []);
+            if (isset($st[$print])) { unset($st[$print]); update_option(self::OPT_STATE, $st, false); }
         }
 
         return true;
@@ -292,25 +300,22 @@ class Printcom_Order_Tracker {
         if (!current_user_can('manage_options')) wp_die('Unauthorized', 403);
 
         $order = isset($_GET['order']) ? sanitize_text_field(wp_unslash($_GET['order'])) : '';
-        $pid   = isset($_GET['pid']) ? (int) $_GET['pid'] : 0;
-        if ($order === '' || $pid <= 0) wp_die('Order of pagina ontbreekt.', 400);
+        if ($order === '') wp_die('Order ontbreekt.', 400);
 
         $nonce_key = 'printcom_ot_delete_order_' . $order;
         if (empty($_GET['_wpnonce']) || !wp_verify_nonce(sanitize_text_field(wp_unslash($_GET['_wpnonce'])), $nonce_key)) {
             wp_die('Nonce invalid', 403);
         }
 
-        // mapping weg
-        $this->remove_order_mapping($order, false);
+        $map = get_option(self::OPT_MAPPINGS, []);
+        $pid = isset($map[$order]['page_id']) ? (int)$map[$order]['page_id'] : 0;
 
-        // pagina hard weg
-        if (get_post($pid)) wp_delete_post($pid, true);
+        $this->remove_order_mapping($order, true);
 
-        // melding via transient
         set_transient('printcom_ot_admin_notice',
             'Order <strong>'.esc_html($order).'</strong> en pagina (ID: '.(int)$pid.') zijn verwijderd.', 30);
 
-        wp_safe_redirect( wp_get_referer() ?: admin_url('options-general.php?page=printcom-ot') );
+        wp_safe_redirect( wp_get_referer() ?: admin_url('admin.php?page=printcom-orders') );
         exit;
     }
 
@@ -319,7 +324,8 @@ class Printcom_Order_Tracker {
 
         // Alleen afdwingen voor door de plugin beheerde orderpagina’s
         $maps = get_option(self::OPT_MAPPINGS, []);
-        if (!in_array((int)$post_ID, array_map('intval', $maps), true)) return;
+        $pids = array_map(fn($i)=> (int)($i['page_id']??0), $maps);
+        if (!in_array((int)$post_ID, $pids, true)) return;
 
         $this->apply_divi_fullwidth_no_sidebar((int)$post_ID);
     }
@@ -329,7 +335,8 @@ class Printcom_Order_Tracker {
 
         $maps = get_option(self::OPT_MAPPINGS, []);
         $pid  = get_queried_object_id();
-        if (!$pid || !in_array((int)$pid, array_map('intval', $maps), true)) {
+        $pids = array_map(fn($i)=> (int)($i['page_id']??0), $maps);
+        if (!$pid || !in_array((int)$pid, $pids, true)) {
             return $template;
         }
 
@@ -346,7 +353,8 @@ class Printcom_Order_Tracker {
 
         $maps = get_option(self::OPT_MAPPINGS, []);
         $pid  = get_queried_object_id();
-        if ($pid && in_array((int)$pid, array_map('intval', $maps), true)) {
+        $pids = array_map(fn($i)=> (int)($i['page_id']??0), $maps);
+        if ($pid && in_array((int)$pid, $pids, true)) {
             // Tell Divi “no sidebar + full-width” via classes, regardless of UI state
             $classes[] = 'et_full_width_page';
             $classes[] = 'et_no_sidebar';
@@ -358,14 +366,23 @@ class Printcom_Order_Tracker {
 
     public function render_order_shortcode($atts=[]) {
         $atts = shortcode_atts(['order'=>''], $atts, 'print_order_status');
-        $orderNum = trim($atts['order']);
-        if ($orderNum==='') return '<div class="printcom-ot printcom-ot--error">Geen ordernummer opgegeven.</div>';
+        $own = trim($atts['order']);
+        if ($own==='') return '<div class="rmh-ot rmh-ot--error">Geen ordernummer opgegeven.</div>';
+
+        $maps = get_option(self::OPT_MAPPINGS, []);
+        if (empty($maps[$own])) return '<div class="rmh-ot rmh-ot--error">Onbekend ordernummer.</div>';
+        $map = $maps[$own];
+        $token = $map['token'] ?? '';
+        if (empty($_GET['token']) || sanitize_text_field(wp_unslash($_GET['token'])) !== $token) {
+            return '<div class="rmh-ot rmh-ot--error">Onjuiste link.</div>';
+        }
+        $orderNum = $map['print_order'];
 
         $cache_key=self::TRANSIENT_PREFIX.md5($orderNum);
         $data=get_transient($cache_key);
         if(!$data){
             $data=$this->api_get_order($orderNum);
-            if(is_wp_error($data)) return '<div class="printcom-ot printcom-ot--error">Kon ordergegevens niet ophalen. '.esc_html($data->get_error_message()).'</div>';
+            if(is_wp_error($data)) return '<div class="rmh-ot rmh-ot--error">Kon ordergegevens niet ophalen. '.esc_html($data->get_error_message()).'</div>';
             set_transient($cache_key,$data,$this->dynamic_cache_ttl_for($data));
         }
         
@@ -386,11 +403,7 @@ class Printcom_Order_Tracker {
 
         // Per-item custom images (admin) — merge van gemapte pagina + huidige pagina (fallback)
         $item_imgs = [];
-        $page_id = 0;
-        $mappings = get_option(self::OPT_MAPPINGS, []);
-        if (!empty($mappings[$orderNum])) {
-            $page_id = (int) $mappings[$orderNum];
-        }
+        $page_id = (int)($map['page_id'] ?? 0);
         if ($page_id) {
             $map_main = get_post_meta($page_id, self::META_ITEM_IMGS, true);
             if (is_array($map_main)) $item_imgs = $map_main;
@@ -412,7 +425,7 @@ class Printcom_Order_Tracker {
 
         $statusLabel=$this->human_status($data);
 
-        $html  = '<div class="printcom-ot">';
+        $html  = '<div class="rmh-ot">';
         // GEEN header-row meer
 
         $items = $data['items'] ?? [];
@@ -430,9 +443,9 @@ class Printcom_Order_Tracker {
             }
         }
 
-        $html .= '<div class="printcom-ot__items"><h3>Bestelde producten</h3>';
+        $html .= '<div class="rmh-ot__items"><h3>Bestelde producten</h3>';
         if($items && is_array($items)){
-            $html .= '<div class="printcom-ot__grid">';
+            $html .= '<div class="rmh-ot__grid">';
             foreach($items as $index=>$it){
                 $inum = $it['orderItemNumber'] ?? '';
                 $qty  = isset($it['quantity']) ? (int)$it['quantity'] : null;
@@ -442,7 +455,7 @@ class Printcom_Order_Tracker {
                 $img_html = '';
                 if ($inum) {
                     $att_id = $this->resolve_item_image_id($inum, $item_imgs);
-                    if ($att_id > 0) $img_html = wp_get_attachment_image($att_id, 'large', false, ['class'=>'printcom-ot__image']);
+                    if ($att_id > 0) $img_html = wp_get_attachment_image($att_id, 'large', false, ['class'=>'rmh-ot__image']);
                 }
                 if (!$img_html) $img_html = $this->placeholder_svg();
 
@@ -477,21 +490,21 @@ class Printcom_Order_Tracker {
 
                 // Render
                 $n = $index + 1;
-                $html .= '<div class="printcom-ot__item">';
-                $html .=   '<div class="printcom-ot__item-header">';
-                $html .=     '<div class="printcom-ot__badge-top">'.$status_badge.'</div>';
-                $html .=     '<h2 class="printcom-ot__title">'.$n.'. '.esc_html($title).'</h2>';
-                if ($inum)  $html .=     '<div class="printcom-ot__sub">'.esc_html($inum).'</div>';
+                $html .= '<div class="rmh-ot__item">';
+                $html .=   '<div class="rmh-ot__item-header">';
+                $html .=     '<div class="rmh-ot__badge-top">'.$status_badge.'</div>';
+                $html .=     '<h2 class="rmh-ot__title">'.$n.'. '.esc_html($title).'</h2>';
+                if ($inum)  $html .=     '<div class="rmh-ot__sub">'.esc_html($inum).'</div>';
                 $html .=   '</div>';
 
-                $html .=   '<div class="printcom-ot__item-grid">';
+                $html .=   '<div class="rmh-ot__item-grid">';
 
                 // kolom 1: foto
-                $html .=   '<div class="printcom-ot__photo">'.$img_html.'</div>';
+                $html .=   '<div class="rmh-ot__photo">'.$img_html.'</div>';
 
                 // kolom 2: specs
                 $html .=   '<div>';
-                    $html .=     '<div class="printcom-ot__panel printcom-ot__specs">';
+                    $html .=     '<div class="rmh-ot__panel rmh-ot__specs">';
                 if ($eig) {
                     $html .= '<h4>Eigenschappen</h4><ul>';
                     foreach ($eig as $ln) $html .= '<li>'.esc_html($ln).'</li>';
@@ -505,9 +518,9 @@ class Printcom_Order_Tracker {
                 $html .=   '</div>';
 
                 // kolom 3: adres + datum/methode + T&T knop
-                $html .=   '<div class="printcom-ot__delivery">';
+                $html .=   '<div class="rmh-ot__delivery">';
                 // Adres
-                $html .=     '<div class="printcom-ot__panel">';
+                $html .=     '<div class="rmh-ot__panel">';
                 $html .=       '<h4>Bezorgadres(sen)</h4>';
                 if ($addr) {
                     $fn      = trim(($addr['firstName'] ?? '').' '.($addr['lastName'] ?? ''));
@@ -527,7 +540,7 @@ class Printcom_Order_Tracker {
                 $html .=     '</div>';
 
                 // Datum & bezorgdienst
-                $html .= '<div class="printcom-ot__panel">';
+                $html .= '<div class="rmh-ot__panel">';
 
                 // Vervoerder + methode
                 if ($carrier_lbl) {
@@ -535,9 +548,9 @@ class Printcom_Order_Tracker {
                     $cinfo  = $this->carrier_logo_and_label((string)$method);
 
                     $html .= '<h4>Je pakket wordt bezorgd door</h4>';
-                    $html .= '<div class="printcom-ot__carrier-row">';
+                    $html .= '<div class="rmh-ot__carrier-row">';
                     if (!empty($cinfo['url'])) {
-                        $html .= '<img src="'.esc_url($cinfo['url']).'" alt="'.esc_attr($cinfo['name']).'" class="printcom-ot__carrier-logo" />';
+                        $html .= '<img src="'.esc_url($cinfo['url']).'" alt="'.esc_attr($cinfo['name']).'" class="rmh-ot__carrier-logo" />';
                     }
                     $html .= '<span>'.esc_html($cinfo['name']).'</span>';
                     $html .= '</div>';
@@ -558,7 +571,7 @@ class Printcom_Order_Tracker {
                 $html .= '</div>';
 
                 // Track & Trace knop / placeholder
-                $html .=     '<div class="printcom-ot__panel printcom-ot__panel--track">'.$btn_html.'</div>';
+                $html .=     '<div class="rmh-ot__panel rmh-ot__panel--track">'.$btn_html.'</div>';
 
                 $html .=   '</div>'; // delivery col
 
@@ -598,10 +611,10 @@ class Printcom_Order_Tracker {
             $prop_label = $labels['property.'.$key] ?? $key;
             $opt_label  = $labels['property.'.$key.'.option.'.$val] ?? $val;
 
-            $pairs[] = '<span class="printcom-ot__chip">'.esc_html($prop_label).': '.esc_html((string)$opt_label).'</span>';
+            $pairs[] = '<span class="rmh-ot__chip">'.esc_html($prop_label).': '.esc_html((string)$opt_label).'</span>';
             if (count($pairs) >= $max) break;
         }
-        return $pairs ? '<div class="printcom-ot__chips">'.implode(' ',$pairs).'</div>' : '';
+        return $pairs ? '<div class="rmh-ot__chips">'.implode(' ',$pairs).'</div>' : '';
     }
 
     private function human_status(array $order) : string {
@@ -639,19 +652,19 @@ class Printcom_Order_Tracker {
         $src=$id?wp_get_attachment_image_src($id,'medium'):null;
         ?>
         <p>Oud veld (1 afbeelding voor de hele pagina). Gebruik liever de metabox “Productfoto’s (per item)”.</p>
-        <div id="printcom-ot-image-preview" style="margin-bottom:10px;"><?php echo $src?'<img src="'.esc_url($src[0]).'" style="max-width:100%;height:auto;" />':'<em>Geen afbeelding gekozen.</em>'; ?></div>
-        <input type="hidden" id="printcom-ot-image-id" name="printcom_ot_image_id" value="<?php echo esc_attr($id); ?>"/>
-        <button type="button" class="button" id="printcom-ot-image-upload">Afbeelding kiezen</button>
-        <button type="button" class="button" id="printcom-ot-image-remove" <?php disabled(!$id); ?>>Verwijderen</button>
+        <div id="rmh-ot-image-preview" style="margin-bottom:10px;"><?php echo $src?'<img src="'.esc_url($src[0]).'" style="max-width:100%;height:auto;" />':'<em>Geen afbeelding gekozen.</em>'; ?></div>
+        <input type="hidden" id="rmh-ot-image-id" name="printcom_ot_image_id" value="<?php echo esc_attr($id); ?>"/>
+        <button type="button" class="button" id="rmh-ot-image-upload">Afbeelding kiezen</button>
+        <button type="button" class="button" id="rmh-ot-image-remove" <?php disabled(!$id); ?>>Verwijderen</button>
         <script>
         (function($){$(function(){
             let frame;
-            $('#printcom-ot-image-upload').on('click',function(e){e.preventDefault(); if(frame){frame.open();return;}
+            $('#rmh-ot-image-upload').on('click',function(e){e.preventDefault(); if(frame){frame.open();return;}
                 frame = wp.media({title:'Kies of upload afbeelding',button:{text:'Gebruik deze afbeelding'},multiple:false});
-                frame.on('select',function(){const a=frame.state().get('selection').first().toJSON();$('#printcom-ot-image-id').val(a.id);$('#printcom-ot-image-preview').html('<img src="'+a.url+'" style="max-width:100%;height:auto;" />');$('#printcom-ot-image-remove').prop('disabled',false);});
+                frame.on('select',function(){const a=frame.state().get('selection').first().toJSON();$('#rmh-ot-image-id').val(a.id);$('#rmh-ot-image-preview').html('<img src="'+a.url+'" style="max-width:100%;height:auto;" />');$('#rmh-ot-image-remove').prop('disabled',false);});
                 frame.open();
             });
-            $('#printcom-ot-image-remove').on('click',function(e){e.preventDefault();$('#printcom-ot-image-id').val('');$('#printcom-ot-image-preview').html('<em>Geen afbeelding gekozen.</em>');$(this).prop('disabled',true);});
+            $('#rmh-ot-image-remove').on('click',function(e){e.preventDefault();$('#rmh-ot-image-id').val('');$('#rmh-ot-image-preview').html('<em>Geen afbeelding gekozen.</em>');$(this).prop('disabled',true);});
         });})(jQuery);
         </script>
         <?php
@@ -667,7 +680,7 @@ class Printcom_Order_Tracker {
         if (!is_array($map)) $map = [];
         ?>
         <p>Voeg per <strong>orderItemNumber</strong> een afbeelding toe. Deze verschijnt bij het juiste product op de bestelpagina.</p>
-        <table class="widefat striped" id="printcom-ot-item-table">
+        <table class="widefat striped" id="rmh-ot-item-table">
             <thead>
                 <tr>
                     <th style="width:220px;">orderItemNumber</th>
@@ -683,13 +696,13 @@ class Printcom_Order_Tracker {
                         <input type="text" name="printcom_ot_item_key[]" value="<?php echo esc_attr($k); ?>" class="regular-text" placeholder="bijv. 6001831441-2"/>
                     </td>
                     <td>
-                        <div class="printcom-ot-item-prev"><?php echo $src?'<img src="'.esc_url($src[0]).'" style="max-height:60px" />':'<em>Geen</em>'; ?></div>
+                        <div class="rmh-ot-item-prev"><?php echo $src?'<img src="'.esc_url($src[0]).'" style="max-height:60px" />':'<em>Geen</em>'; ?></div>
                         <input type="hidden" name="printcom_ot_item_media[]" value="<?php echo esc_attr((int)$att_id); ?>"/>
-                        <button type="button" class="button printcom-ot-pick">Kies/Upload</button>
-                        <button type="button" class="button printcom-ot-clear">X</button>
+                        <button type="button" class="button rmh-ot-pick">Kies/Upload</button>
+                        <button type="button" class="button rmh-ot-clear">X</button>
                     </td>
                     <td>
-                        <button type="button" class="button link-delete printcom-ot-row-del">Verwijderen</button>
+                        <button type="button" class="button link-delete rmh-ot-row-del">Verwijderen</button>
                     </td>
                 </tr>
             <?php endforeach; endif; ?>
@@ -697,7 +710,7 @@ class Printcom_Order_Tracker {
             <tfoot>
                 <tr>
                     <td colspan="3">
-                        <button type="button" class="button" id="printcom-ot-row-add">+ Regel toevoegen</button>
+                        <button type="button" class="button" id="rmh-ot-row-add">+ Regel toevoegen</button>
                     </td>
                 </tr>
             </tfoot>
@@ -705,31 +718,31 @@ class Printcom_Order_Tracker {
         <script>
         (function($){
           $(function(){
-            const $tbl = $('#printcom-ot-item-table tbody');
+            const $tbl = $('#rmh-ot-item-table tbody');
 
             // Nieuwe regel toevoegen (let op type="button" om submit te voorkomen)
-            $('#printcom-ot-row-add').on('click', function(e){
+            $('#rmh-ot-row-add').on('click', function(e){
               e.preventDefault();
               $tbl.append(`<tr>
                 <td><input type="text" name="printcom_ot_item_key[]" value="" class="regular-text" placeholder="bijv. 6001831441-2"/></td>
                 <td>
-                  <div class="printcom-ot-item-prev"><em>Geen</em></div>
+                  <div class="rmh-ot-item-prev"><em>Geen</em></div>
                   <input type="hidden" name="printcom_ot_item_media[]" value=""/>
-                  <button type="button" class="button printcom-ot-pick">Kies/Upload</button>
-                  <button type="button" class="button printcom-ot-clear">X</button>
+                  <button type="button" class="button rmh-ot-pick">Kies/Upload</button>
+                  <button type="button" class="button rmh-ot-clear">X</button>
                 </td>
-                <td><button type="button" class="button link-delete printcom-ot-row-del">Verwijderen</button></td>
+                <td><button type="button" class="button link-delete rmh-ot-row-del">Verwijderen</button></td>
               </tr>`);
             });
 
             // Rij verwijderen
-            $(document).on('click', '.printcom-ot-row-del', function(e){
+            $(document).on('click', '.rmh-ot-row-del', function(e){
               e.preventDefault();
               $(this).closest('tr').remove();
             });
 
             // Belangrijk: per klik een NIEUW media frame zodat de selectie naar de juiste rij gaat
-            $(document).on('click', '.printcom-ot-pick', function(e){
+            $(document).on('click', '.rmh-ot-pick', function(e){
               e.preventDefault();
               const $td = $(this).closest('td');
 
@@ -742,18 +755,18 @@ class Printcom_Order_Tracker {
               frame.on('select', function(){
                 const a = frame.state().get('selection').first().toJSON();
                 $td.find('input[type=hidden]').val(a.id);
-                $td.find('.printcom-ot-item-prev').html('<img src="'+a.url+'" style="max-height:60px"/>');
+                $td.find('.rmh-ot-item-prev').html('<img src="'+a.url+'" style="max-height:60px"/>');
               });
 
               frame.open();
             });
 
             // Clear
-            $(document).on('click', '.printcom-ot-clear', function(e){
+            $(document).on('click', '.rmh-ot-clear', function(e){
               e.preventDefault();
               const $td = $(this).closest('td');
               $td.find('input[type=hidden]').val('');
-              $td.find('.printcom-ot-item-prev').html('<em>Geen</em>');
+              $td.find('.rmh-ot-item-prev').html('<em>Geen</em>');
             });
           });
         })(jQuery);
@@ -778,7 +791,7 @@ class Printcom_Order_Tracker {
     }
 
     private function placeholder_svg(): string {
-        return '<svg class="printcom-ot__image" role="img" aria-label="Afbeelding volgt" xmlns="http://www.w3.org/2000/svg" width="600" height="338" viewBox="0 0 600 338"><rect width="100%" height="100%" fill="#f2f2f2"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#999" font-family="Arial,Helvetica,sans-serif" font-size="18">Afbeelding volgt</text></svg>';
+        return '<svg class="rmh-ot__image" role="img" aria-label="Afbeelding volgt" xmlns="http://www.w3.org/2000/svg" width="600" height="338" viewBox="0 0 600 338"><rect width="100%" height="100%" fill="#f2f2f2"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#999" font-family="Arial,Helvetica,sans-serif" font-size="18">Afbeelding volgt</text></svg>';
     }
 
     private function resolve_item_image_id(string $orderItemNumber, array $map): int {
@@ -1031,7 +1044,7 @@ class Printcom_Order_Tracker {
             case 'ERROR':                $class = 'behandelen'; break;
         }
 
-        return '<span class="printcom-ot__badge printcom-ot__badge--'.$class.'">'.
+        return '<span class="rmh-ot__badge rmh-ot__badge--'.$class.'">'.
                esc_html($this->item_status_nl($status)).
                '</span>';
     }
@@ -1114,82 +1127,12 @@ class Printcom_Order_Tracker {
     /* ===== Styles ===== */
 
     public function enqueue_styles() {
-        $css = '
-        /* ===== Basis / layout ===== */
-        .printcom-ot{border:0;padding:0}
-        .printcom-ot--error{border:1px solid #f5c2c7;background:#f8d7da;padding:12px;border-radius:8px;color:#842029}
-        .printcom-ot__items{display:flex;flex-direction:column;align-items:flex-start;}
-        .printcom-ot__items h3{margin:10px 0;text-align:left!important;margin-left:0}
-        .printcom-ot__grid{display:block!important}
-        .printcom-ot__items::after{content:"";display:block;clear:both}
-        .printcom-ot__item{display:block;border:1px solid #eee;border-radius:16px;background:#fff;padding:18px;margin:18px auto;width:100%;max-width:1100px}
-        .printcom-ot__item-grid{display:grid;grid-template-columns:280px 2fr 1.5fr;gap:20px;align-items:start;}
-        @media(max-width:1200px)and(min-width:901px){.printcom-ot__item-grid{grid-template-columns:200px 2fr 1.2fr;}}
-        @media(max-width:900px){.printcom-ot__item-grid{grid-template-columns:1fr;}}
-
-        /* Afbeelding & header */
-        .printcom-ot__image{width:100%;height:auto;display:block}
-        @media(max-width:1200px)and(min-width:901px){.printcom-ot__photo{max-width: 200px;}}
-        .printcom-ot__title{font-size:1.8rem;font-weight:800;margin:0}
-        .printcom-ot__sub{color:#E53935;font-weight:700;margin:.3rem 0 1rem}
-        .printcom-ot__item-header{position:relative;margin-bottom:.5rem}
-        .printcom-ot__badge-top{position:absolute;right:18px;top:18px} /* desktop/tablet */
-
-        /* Mobiel: titel → orderregel → badge (gecentreerd onder elkaar) */
-        @media(max-width:600px){
-          .printcom-ot__item-header{display:flex;flex-direction:column;text-align:center}
-          .printcom-ot__title{order:1;margin-bottom:2px!important;}
-          .printcom-ot__sub{order:2;margin-top:0!important;margin-bottom:4px!important;}
-          .printcom-ot__badge-top{order:3;position:static;display:inline-block;margin-top:4px;}
-        }
-
-        /* Status-badge kleuren (per product) */
-        .printcom-ot__badge{display:inline-block;padding:6px 12px;border-radius:20px;font-size:.85rem;font-weight:600;color:#fff}
-        .printcom-ot__badge--inproductie{background:#0B63C4}
-        .printcom-ot__badge--behandelen{background:#6c757d}
-        .printcom-ot__badge--verzonden{background:#198754}
-        .printcom-ot__badge--deels{background:#ffc107;color:#000}
-        .printcom-ot__badge--bezorgd{background:#28a745}
-        .printcom-ot__badge--geannuleerd{background:#dc3545}
-        .printcom-ot__badge--onbekend{background:#adb5bd}
-
-        /* Panels */
-        .printcom-ot__panel{background:#fff;border:1px solid #eee;border-radius:14px;padding:14px}
-        .printcom-ot__panel h4{color:#232323;margin:.2rem 0 8px}
-        .printcom-ot__panel p{color:#232323;margin:.2rem 0}
-
-        /* Specs: bullets uit, tekstkleur gelijk aan Extra’s */
-        .printcom-ot__specs h4{color:#B71C1C}
-        .printcom-ot__specs ul{list-style:none!important;margin:.2rem 0 0!important;padding-left:0!important}
-        .printcom-ot__specs li,.printcom-ot__specs p{margin:.2rem 0;padding-left:0;color:#232323;font-size:1rem;line-height:1.5;letter-spacing:normal;font-family:inherit;font-weight:400}
-        .printcom-ot__specs p{display:inline}
-
-        /* Delivery kolom + vervoerder */
-        .printcom-ot__delivery{display:flex;flex-direction:column;gap:16px}
-        .printcom-ot__dtbig{color:#232323;font-size:1.2rem;font-weight:700;margin:.2rem 0}
-        .printcom-ot__dtsmall{color:#232323;margin:.1rem 0}
-        .printcom-ot__carrier{color:#232323;font-weight:600}
-        .printcom-ot__carrier-row{display:flex;align-items:center;gap:8px;margin:4px 0}
-        .printcom-ot__carrier-logo{height:50px;width:auto;display:inline-block}
-
-        /* Track & Trace paneel: rechts op desktop, center op mobiel */
-        .printcom-ot__panel--track{text-align:right;background:none;border:none;padding:0}
-        @media(max-width:900px){.printcom-ot__panel--track{text-align:center}}
-
-        /* Knoppen */
-        .btn{display:inline-block;padding:12px 16px;border-radius:12px;text-decoration:none;border:1px solid #ddd}
-        .btn--track{background:#E53935;color:#fff;border-color:#B71C1C}
-        .btn--track[aria-disabled="true"]{background:#ffcdd2;border-color:#ef9a9a;color:#B71C1C;cursor:not-allowed}
-        ';
-        wp_register_style('printcom-ot-style', false);
-        wp_enqueue_style('printcom-ot-style');
-        wp_add_inline_style('printcom-ot-style', $css);
+        wp_enqueue_style('rmh-ot-style', plugins_url('assets/css/order-tracker.css', __FILE__), [], '1.0');
     }
 
     /* ===== HTTP helpers ===== */
 
     private function get_settings(){ return get_option(self::OPT_SETTINGS,[]); }
-    public function maybe_force_ipv4_for_printcom($h,$r,$url){ $s=$this->get_settings(); if(!empty($s['force_ipv4']) && is_string($url) && stripos($url,'https://api.print.com')===0 && defined('CURLOPT_IPRESOLVE')) curl_setopt($h,CURLOPT_IPRESOLVE,CURL_IPRESOLVE_V4); }
 
     /* ===== API client ===== */
 
@@ -1267,7 +1210,7 @@ class Printcom_Order_Tracker {
         $is_print_login=(stripos($auth,'/login')!==false);
         if ($is_print_login){
             if ($username==='' || $password==='') return new WP_Error('printcom_auth_missing','Username/Password ontbreken.');
-            $payload=!empty($s['alt_payload'])?wp_json_encode(['username'=>$username,'password'=>$password]):wp_json_encode(['credentials'=>['username'=>$username,'password'=>$password]]);
+            $payload=wp_json_encode(['credentials'=>['username'=>$username,'password'=>$password]]);
             $res=wp_remote_post($auth,['headers'=>['Accept'=>'application/json','Content-Type'=>'application/json','User-Agent'=>$ua],'body'=>$payload,'timeout'=>20]);
             if (is_wp_error($res)) return $res;
             $code=wp_remote_retrieve_response_code($res); $raw=wp_remote_retrieve_body($res);
@@ -1341,11 +1284,12 @@ class Printcom_Order_Tracker {
 
     /* ===== Cron ===== */
 
-    public function cron_refresh_token(){ delete_transient(self::TRANSIENT_TOKEN); $t=$this->get_access_token(true); if(is_wp_error($t)) error_log('[Printcom OT] Token verversen mislukt: '.$t->get_error_message()); else error_log('[Printcom OT] Token ververst.'); }
+    public function cron_refresh_token(){ delete_transient(self::TRANSIENT_TOKEN); $t=$this->get_access_token(true); if(is_wp_error($t)) error_log('[Printcom OT] Token verversen mislukt: '.$t->get_error_message()); }
     public function cron_warm_cache(){
         $st=get_option(self::OPT_STATE,[]); $map=get_option(self::OPT_MAPPINGS,[]); if(empty($map))return;
         $hot_limit=50; $cold_limit=20; $archive_days=14; $now=time(); $orders=[];
-        foreach($map as $ord=>$pid){
+        foreach($map as $info){
+            $ord=$info['print_order']??''; if($ord==='') continue;
             $e=$st[$ord]??null; $complete_at=$e['complete_at']??null; $status=$e['status']??null;
             if($complete_at && ($now-(int)$complete_at)>($archive_days*DAY_IN_SECONDS)) continue;
             $isComplete=($complete_at!==null)||($status==='shipped'||$status==='completed');
@@ -1356,7 +1300,6 @@ class Printcom_Order_Tracker {
         usort($hot,function($a,$b){return $b['last_seen']<=>$a['last_seen'];});
         $ph=0; foreach($hot as $o){ if($ph>=$hot_limit)break; $d=$this->api_get_order($o['order']); if(!is_wp_error($d)) set_transient(self::TRANSIENT_PREFIX.md5($o['order']),$d,$this->dynamic_cache_ttl_for($d)); $ph++; }
         $pc=0; foreach($cold as $o){ if($pc>=$cold_limit)break; $d=$this->api_get_order($o['order']); if(!is_wp_error($d)) set_transient(self::TRANSIENT_PREFIX.md5($o['order']),$d,$this->dynamic_cache_ttl_for($d)); $pc++; }
-        error_log('[Printcom OT] Warmed HOT: '.$ph.'; COLD: '.$pc.'.');
     }
 }
 
@@ -1374,7 +1317,7 @@ add_action('admin_post_printcom_ot_test_connection', function(){
     $auth=$s['auth_url']??''; $u=trim($s['username']??''); $p=preg_replace("/\r\n|\r|\n/","",(string)($s['password']??'')); $ua='RMH-Printcom-Tracker/1.6.1 (+WordPress)';
     if(!$auth||!$u||!$p){ $msg='❌ Ontbrekende instellingen (auth_url/username/password).'; }
     else{
-        $payload=!empty($s['alt_payload'])?wp_json_encode(['username'=>$u,'password'=>$p]):wp_json_encode(['credentials'=>['username'=>$u,'password'=>$p]]);
+        $payload=wp_json_encode(['credentials'=>['username'=>$u,'password'=>$p]]);
         $args=['headers'=>['Accept'=>'application/json','Content-Type'=>'application/json','User-Agent'=>$ua],'body'=>$payload,'timeout'=>20];
         $res=wp_remote_post($auth,$args);
         if(is_wp_error($res)) $msg='❌ Verbindingsfout: '.$res->get_error_message();
