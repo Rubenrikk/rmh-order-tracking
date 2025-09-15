@@ -377,11 +377,13 @@ class Printcom_Order_Tracker {
             $error = '<div class="rmh-ot rmh-ot--error">Onbekend ordernummer of postcode.</div>';
         }
         $form  = '<form class="rmh-ot__lookup-form" method="post">';
-        $form .= '<label for="rmh_ot_lookup_order">Ordernummer (bijv. RMH-12345)</label> ';
-        $form .= '<input type="text" id="rmh_ot_lookup_order" name="rmh_ot_lookup_order" placeholder="RMH-[nummer]" required/> ';
-        $form .= '<label for="rmh_ot_lookup_postcode">Postcode (bijv. 1234AB)</label> ';
-        $form .= '<input type="text" id="rmh_ot_lookup_postcode" name="rmh_ot_lookup_postcode" placeholder="1234AB" required/> ';
-        $form .= '<button type="submit">Zoek bestelling</button>';
+        $form .= '<label for="rmh_ot_lookup_order">Ordernummer</label>';
+        $form .= '<input type="text" id="rmh_ot_lookup_order" name="rmh_ot_lookup_order" placeholder="RMH-[nummer]" required/>';
+        $form .= '<small>Bijv. RMH-12345</small>';
+        $form .= '<label for="rmh_ot_lookup_postcode">Postcode</label>';
+        $form .= '<input type="text" id="rmh_ot_lookup_postcode" name="rmh_ot_lookup_postcode" placeholder="1234AB" required/>';
+        $form .= '<small>Bijv. 1234AB</small>';
+        $form .= '<button type="submit" class="btn btn--track">Zoek bestelling</button>';
         $form .= '</form>';
         return $error . $form;
     }
