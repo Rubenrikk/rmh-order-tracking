@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     2.1.2
+ * Version:     2.1.3
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -377,12 +377,14 @@ class Printcom_Order_Tracker {
             $error = '<div class="rmh-ot rmh-ot--error">Onbekend ordernummer of postcode.</div>';
         }
         $form  = '<form class="rmh-ot__lookup-form" method="post">';
-        $form .= '<label for="rmh_ot_lookup_order">Ordernummer</label>';
-        $form .= '<input type="text" id="rmh_ot_lookup_order" name="rmh_ot_lookup_order" placeholder="RMH-[nummer]" required/>';
-        $form .= '<small>Bijv. RMH-12345</small>';
-        $form .= '<label for="rmh_ot_lookup_postcode">Postcode</label>';
-        $form .= '<input type="text" id="rmh_ot_lookup_postcode" name="rmh_ot_lookup_postcode" placeholder="1234AB" required/>';
-        $form .= '<small>Bijv. 1234AB</small>';
+        $form .= '<div class="rmh-ot__field">';
+        $form .=   '<label for="rmh_ot_lookup_order">Ordernummer <span class="required">*</span></label>';
+        $form .=   '<input type="text" id="rmh_ot_lookup_order" name="rmh_ot_lookup_order" placeholder="RMH-12345" required />';
+        $form .= '</div>';
+        $form .= '<div class="rmh-ot__field">';
+        $form .=   '<label for="rmh_ot_lookup_postcode">Postcode <span class="required">*</span></label>';
+        $form .=   '<input type="text" id="rmh_ot_lookup_postcode" name="rmh_ot_lookup_postcode" placeholder="1234AB" required />';
+        $form .= '</div>';
         $form .= '<button type="submit" class="btn btn--track">Zoek bestelling</button>';
         $form .= '</form>';
         return $error . $form;
@@ -402,22 +404,9 @@ class Printcom_Order_Tracker {
         $cache_key=self::TRANSIENT_PREFIX.md5($orderNum);
         $data=null;
 
-        if (!$valid && !empty($_POST['rmh_ot_postcode'])) {
-            $data=get_transient($cache_key);
-            if(!$data){
-                $data=$this->api_get_order($orderNum);
-                if(is_wp_error($data)) return '<div class="rmh-ot rmh-ot--error">Kon ordergegevens niet ophalen. '.esc_html($data->get_error_message()).'</div>';
-                set_transient($cache_key,$data,$this->dynamic_cache_ttl_for($data));
-            }
-            $addr=$this->extract_primary_shipping_address($data);
-            $postal=preg_replace('/\s+/','',strtoupper($addr['postcode']??''));
-            $input=preg_replace('/\s+/','',strtoupper(sanitize_text_field(wp_unslash($_POST['rmh_ot_postcode']))));
-            if($input===$postal) $valid=true;
-        }
-
-        if(!$valid){
-            $form='<form class="rmh-ot__postcode-form" method="post"><label for="rmh_ot_postcode">Geen link? Vul je postcode in:</label> <input type="text" id="rmh_ot_postcode" name="rmh_ot_postcode" required/> <button type="submit">Toon bestelling</button></form>';
-            return '<div class="rmh-ot rmh-ot--error">Onjuiste link. Gebruik de link uit de e-mail om je bestelling te bekijken.' . $form . '</div>';
+        if (!$valid) {
+            wp_safe_redirect( home_url( '/bestellingen' ) );
+            exit;
         }
 
         if(!$data){
