@@ -26,6 +26,7 @@ class Printcom_Order_Tracker {
         add_action('save_post_page', [$this, 'enforce_divi_layout_on_save'], 20, 3);
 
         add_shortcode('print_order_status', [$this, 'render_order_shortcode']);
+        add_shortcode('print_order_lookup', [$this, 'render_lookup_shortcode']);
 
         add_action('add_meta_boxes', [$this, 'add_metaboxes']);
         add_action('save_post',       [$this, 'save_metaboxes']);
@@ -222,16 +223,6 @@ class Printcom_Order_Tracker {
         $parent_id = 0;
         $parent = get_page_by_path('bestellingen');
         if ($parent) { $parent_id = (int)$parent->ID; }
-        else {
-            $parent_id = wp_insert_post([
-                'post_title' => 'Bestellingen',
-                'post_name'  => 'bestellingen',
-                'post_status'=> 'publish',
-                'post_type'  => 'page',
-                'post_author'=> get_current_user_id(),
-            ]);
-            if (is_wp_error($parent_id)) $parent_id = 0; else $parent_id = (int)$parent_id;
-        }
 
         $token = $mappings[$ownOrder]['token'] ?? wp_generate_password(20,false,false);
 
@@ -363,6 +354,39 @@ class Printcom_Order_Tracker {
     }
 
     /* ===== Shortcode ===== */
+
+    public function render_lookup_shortcode() {
+        $error = '';
+        if (!empty($_POST['rmh_ot_lookup_order']) && !empty($_POST['rmh_ot_lookup_postcode'])) {
+            $order = sanitize_text_field(wp_unslash($_POST['rmh_ot_lookup_order']));
+            $maps  = get_option(self::OPT_MAPPINGS, []);
+            if (!empty($maps[$order])) {
+                $map   = $maps[$order];
+                $data  = $this->api_get_order($map['print_order']);
+                if (!is_wp_error($data)) {
+                    $addr  = $this->extract_primary_shipping_address($data);
+                    $postal= preg_replace('/\s+/','',strtoupper($addr['postcode'] ?? ''));
+                    $input = preg_replace('/\s+/','',strtoupper(sanitize_text_field(wp_unslash($_POST['rmh_ot_lookup_postcode']))));
+                    if ($input === $postal) {
+                        $url = add_query_arg('token', rawurlencode($map['token']), get_permalink((int)$map['page_id']));
+                        wp_safe_redirect($url);
+                        exit;
+                    }
+                }
+            }
+            $error = '<div class="rmh-ot rmh-ot--error">Onbekend ordernummer of postcode.</div>';
+        }
+        $form  = '<form class="rmh-ot__lookup-form" method="post">';
+        $form .= '<label for="rmh_ot_lookup_order">Ordernummer</label>';
+        $form .= '<input type="text" id="rmh_ot_lookup_order" name="rmh_ot_lookup_order" placeholder="RMH-[nummer]" required/>';
+        $form .= '<small>Bijv. RMH-12345</small>';
+        $form .= '<label for="rmh_ot_lookup_postcode">Postcode</label>';
+        $form .= '<input type="text" id="rmh_ot_lookup_postcode" name="rmh_ot_lookup_postcode" placeholder="1234AB" required/>';
+        $form .= '<small>Bijv. 1234AB</small>';
+        $form .= '<button type="submit" class="btn btn--track">Zoek bestelling</button>';
+        $form .= '</form>';
+        return $error . $form;
+    }
 
     public function render_order_shortcode($atts=[]) {
         $atts = shortcode_atts(['order'=>''], $atts, 'print_order_status');

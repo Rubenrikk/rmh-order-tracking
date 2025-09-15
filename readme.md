@@ -8,14 +8,16 @@ Tokens worden automatisch vernieuwd. Ontworpen om goed samen te werken met **Div
 1. Upload de plugin of installeer via [WPPusher](https://wppusher.com).
 2. Activeer de plugin via **Plugins → Geïnstalleerde plugins**.
 3. Ga naar **Instellingen → Print.com Orders** en vul je API-gegevens in.
-4. Voeg een ordernummer toe via het menu **Print.com Orders**.  
+4. Voeg een ordernummer toe via het menu **Print.com Orders**.
    De plugin maakt automatisch een pagina aan met de shortcode:  [print_order_status order=“123456789”]
+5. Plaats de shortcode [print_order_lookup] om klanten te laten zoeken op ordernummer en postcode.
 
 ## Features
 - Automatisch pagina’s aanmaken/bijwerken per ordernummer  
-- Orderstatus, producten en Track & Trace links tonen  
-- Cache instelbaar (default 30 minuten)  
-- Ondersteuning voor eigen afbeelding per orderpagina  
+- Orderstatus, producten en Track & Trace links tonen
+- Zoekformulier op ordernummer + postcode via shortcode [print_order_lookup]
+- Cache instelbaar (default 30 minuten)
+- Ondersteuning voor eigen afbeelding per orderpagina
 - Tokens worden automatisch vernieuwd  
 
 ## Vereisten
