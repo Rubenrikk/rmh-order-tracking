@@ -11,6 +11,7 @@
     margin-top: 0;
     text-align: center;
     font-weight: 700;
+    font-size: 2rem;
 }
 
 .rmh-order-lookup .rmh-ol__feedback {
@@ -40,17 +41,6 @@
     gap: 20px;
 }
 
-.rmh-order-lookup .rmh-ol__row {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-}
-
-@media (min-width: 640px) {
-    .rmh-order-lookup .rmh-ol__row {
-        flex-direction: row;
-    }
-}
 
 .rmh-order-lookup .rmh-ol__field {
     flex: 1;
