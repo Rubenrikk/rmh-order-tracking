@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     1.9.5
+ * Version:     1.9.6
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -1123,9 +1123,9 @@ class Printcom_Order_Tracker {
         .printcom-ot__grid{display:block!important}
         .printcom-ot__items::after{content:"";display:block;clear:both}
         .printcom-ot__item{display:block;border:1px solid #eee;border-radius:16px;background:#fff;padding:18px;margin:18px auto;width:100%;max-width:1100px}
-        .printcom-ot__item-grid{display:grid;grid-template-columns:280px 2fr 1fr;gap:20px;align-items:start}
-        @media(max-width:1200px){.printcom-ot__item-grid{grid-template-columns:220px 2fr}}
-        @media(max-width:900px){.printcom-ot__item-grid{grid-template-columns:1fr}}
+        .printcom-ot__item-grid{display:grid;grid-template-columns:280px 2fr 1.5fr;gap:20px;align-items:start;}
+        @media(max-width:1200px){.printcom-ot__item-grid{grid-template-columns:250px 2fr;}}
+        @media(max-width:900px){.printcom-ot__item-grid{grid-template-columns:1fr;}}
 
         /* Afbeelding & header */
         .printcom-ot__image{width:100%;height:auto;display:block}
