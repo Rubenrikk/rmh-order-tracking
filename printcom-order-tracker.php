@@ -421,10 +421,11 @@ class Printcom_Order_Tracker {
 
         $maps = get_option(self::OPT_MAPPINGS, []);
         if (empty($maps[$own])) return '<div class="rmh-ot rmh-ot--error">Onbekend ordernummer.</div>';
-        $map      = $maps[$own];
-        $token    = $map['token'] ?? '';
-        $orderNum = $map['print_order'];
-        $valid    = !empty($_GET['token']) && sanitize_text_field(wp_unslash($_GET['token'])) === $token;
+        $map            = $maps[$own];
+        $token          = $map['token'] ?? '';
+        $orderNum       = $map['print_order'];
+        $requestedToken = isset($_GET['token']) ? sanitize_text_field(wp_unslash($_GET['token'])) : '';
+        $valid          = is_user_logged_in() || ($requestedToken !== '' && $requestedToken === $token);
         $cache_key=self::TRANSIENT_PREFIX.md5($orderNum);
         $data=null;
 
