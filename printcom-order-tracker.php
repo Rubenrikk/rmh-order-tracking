@@ -479,13 +479,28 @@ class Printcom_Order_Tracker {
             $item_imgs = $norm;
         }
 
-        $statusLabel=$this->human_status($data);
+        $items = $data['items'] ?? [];
+        $shipments = $data['shipments'] ?? [];
+        $product_count = 0;
+        if (is_array($items)) {
+            foreach ($items as $item_entry) {
+                if (is_array($item_entry)) {
+                    $product_count++;
+                }
+            }
+        }
+        $overall_status = $this->determine_overall_order_status($data);
 
         $html  = '<div class="rmh-ot">';
         // GEEN header-row meer
 
-        $items = $data['items'] ?? [];
-        $shipments = $data['shipments'] ?? [];
+        $summary_html = sprintf(
+            'Je bestelling bevat <span class="rmh-ot__summary-count">%s</span> %s, status: <span class="rmh-ot__summary-status">%s</span>.',
+            esc_html(number_format_i18n($product_count)),
+            esc_html($product_count === 1 ? 'product' : 'producten'),
+            esc_html($overall_status)
+        );
+        $html .= '<p class="rmh-ot__summary">' . $summary_html . '</p>';
 
         // Tracklinks per itemNumber
         $tracks_by_item=[];
@@ -691,6 +706,101 @@ class Printcom_Order_Tracker {
         if ($s==='acceptedbysupplier' || $s==='orderreceived' || $s==='draft' || $s==='processing') return 'In behandeling';
         if ($s==='cancelled' || $s==='canceled' || $s==='refusedbysupplier') return 'Geannuleerd';
         return $items ? 'In behandeling' : 'Onbekend';
+    }
+
+    private function determine_overall_order_status(array $order): string {
+        $items = $order['items'] ?? [];
+        $counts = [
+            'delivered'  => 0,
+            'shipped'    => 0,
+            'production' => 0,
+            'processing' => 0,
+            'cancelled'  => 0,
+            'unknown'    => 0,
+        ];
+        $total = 0;
+
+        if (is_array($items)) {
+            foreach ($items as $item) {
+                if (!is_array($item)) continue;
+                $total++;
+                $class = $this->classify_item_status(isset($item['status']) ? (string)$item['status'] : '');
+                switch ($class) {
+                    case 'bezorgd':
+                        $counts['delivered']++;
+                        break;
+                    case 'verzonden':
+                    case 'deels':
+                        $counts['shipped']++;
+                        break;
+                    case 'inproductie':
+                        $counts['production']++;
+                        break;
+                    case 'behandelen':
+                        $counts['processing']++;
+                        break;
+                    case 'geannuleerd':
+                        $counts['cancelled']++;
+                        break;
+                    default:
+                        $counts['unknown']++;
+                        break;
+                }
+            }
+        }
+
+        if ($total > 0) {
+            if ($counts['cancelled'] === $total) {
+                return 'Geannuleerd';
+            }
+            if ($counts['cancelled'] > 0) {
+                return 'Deels geannuleerd';
+            }
+            if ($counts['delivered'] === $total) {
+                return 'Geleverd';
+            }
+            if (($counts['shipped'] + $counts['delivered']) === $total) {
+                return 'Verzonden';
+            }
+            if (($counts['shipped'] + $counts['delivered']) > 0 && ($counts['production'] > 0 || $counts['processing'] > 0 || $counts['unknown'] > 0)) {
+                return 'Gedeeltelijk verzonden';
+            }
+            if ($counts['production'] > 0 && $counts['shipped'] === 0 && $counts['delivered'] === 0 && $counts['cancelled'] === 0 && $counts['unknown'] === 0) {
+                return 'In productie';
+            }
+            if (($counts['processing'] + $counts['unknown']) === $total) {
+                return 'In behandeling';
+            }
+            if ($counts['processing'] > 0 && $counts['shipped'] === 0 && $counts['delivered'] === 0 && $counts['production'] === 0) {
+                return 'In behandeling';
+            }
+        }
+
+        return $this->fallback_overall_status($order['status'] ?? '');
+    }
+
+    private function fallback_overall_status($status): string {
+        $status_str = is_string($status) ? $status : (string)$status;
+        $s = strtoupper(trim($status_str));
+        if ($s === '') {
+            return 'In behandeling';
+        }
+        if ($s === 'DELIVERED') {
+            return 'Geleverd';
+        }
+        if (in_array($s, ['SHIPPED', 'INTRANSIT'], true)) {
+            return 'Verzonden';
+        }
+        if (in_array($s, ['CANCELLED', 'CANCELED', 'REFUSEDBYSUPPLIER'], true)) {
+            return 'Geannuleerd';
+        }
+        if (in_array($s, ['READYFORPRODUCTION', 'PREPAREDFORPRINT', 'PRINTED', 'CUT', 'FINISHED', 'ACCEPTEDBYSUPPLIER', 'QUALITYAPPROVED', 'INPRODUCTION'], true)) {
+            return 'In productie';
+        }
+        if (in_array($s, ['ORDERRECEIVED', 'DRAFT', 'PROCESSING', 'SENTTOSUPPLIER', 'PACKED', 'MANUALCHECK', 'DESIGNADDED', 'DESIGNCONFIRMED', 'DESIGNREJECTED', 'DESIGNWARNING', 'WAITINGFORPAYMENT', 'ERROR'], true)) {
+            return 'In behandeling';
+        }
+        return 'In behandeling';
     }
 
     /* ===== Metaboxes ===== */
@@ -1061,47 +1171,66 @@ class Printcom_Order_Tracker {
         return null;
     }
 
-    private function item_status_badge(string $status): string {
-        $s = strtoupper($status);
-        $class = 'onbekend';
+    private function classify_item_status(string $status): string {
+        $s = strtoupper(trim($status));
+        if ($s === '') {
+            return 'onbekend';
+        }
 
         switch ($s) {
-            case 'DELIVERED':            $class = 'bezorgd'; break;
+            case 'DELIVERED':
+                return 'bezorgd';
+
             case 'SHIPPED':
-            case 'INTRANSIT':            $class = 'verzonden'; break;
+            case 'INTRANSIT':
+                return 'verzonden';
+
+            case 'POSSIBLYDELAYED':
+            case 'PARTIALLYSHIPPED':
+                return 'deels';
 
             case 'ACCEPTEDBYSUPPLIER':
             case 'READYFORPRODUCTION':
             case 'PREPAREDFORPRINT':
             case 'PRINTED':
             case 'CUT':
-            case 'FINISHED':             $class = 'inproductie'; break;
+            case 'FINISHED':
+            case 'INPRODUCTION':
+            case 'PRODUCED':
+            case 'READYFORDELIVERY':
+                return 'inproductie';
 
             case 'ORDERRECEIVED':
             case 'DRAFT':
             case 'PACKED':
-            case 'SENTTOSUPPLIER':       $class = 'behandelen'; break;
-
-            case 'CANCELEDBYUSER':
-            case 'CANCELEDBYSUPPLIER':
-            case 'REFUSEDBYSUPPLIER':    $class = 'geannuleerd'; break;
-
-            case 'QUALITYAPPROVED':      $class = 'behandelen'; break;
-            case 'QUALITYREJECTED':      $class = 'geannuleerd'; break;
-
-            case 'RETURNED':
-            case 'RETURNREQUESTED':      $class = 'geannuleerd'; break;
-
-            case 'POSSIBLYDELAYED':      $class = 'deels'; break;
-
+            case 'SENTTOSUPPLIER':
+            case 'QUALITYAPPROVED':
             case 'MANUALCHECK':
             case 'DESIGNADDED':
             case 'DESIGNCONFIRMED':
             case 'DESIGNREJECTED':
             case 'DESIGNWARNING':
             case 'WAITINGFORPAYMENT':
-            case 'ERROR':                $class = 'behandelen'; break;
+            case 'ERROR':
+            case 'PROCESSING':
+                return 'behandelen';
+
+            case 'CANCELEDBYUSER':
+            case 'CANCELEDBYSUPPLIER':
+            case 'REFUSEDBYSUPPLIER':
+            case 'CANCELLED':
+            case 'CANCELED':
+            case 'QUALITYREJECTED':
+            case 'RETURNED':
+            case 'RETURNREQUESTED':
+                return 'geannuleerd';
         }
+
+        return 'onbekend';
+    }
+
+    private function item_status_badge(string $status): string {
+        $class = $this->classify_item_status($status);
 
         return '<span class="rmh-ot__badge rmh-ot__badge--'.$class.'">'.
                esc_html($this->item_status_nl($status)).
@@ -1257,7 +1386,7 @@ class Printcom_Order_Tracker {
         global $post;
         $content = $post->post_content ?? '';
         if (has_shortcode($content, 'print_order_status')) {
-            wp_enqueue_style('rmh-ot-style', plugins_url('assets/css/order-tracker.css', __FILE__), [], '1.0');
+            wp_enqueue_style('rmh-ot-style', plugins_url('assets/css/order-tracker.css', __FILE__), [], '1.1.0');
         }
         if (has_shortcode($content, 'print_order_lookup')) {
             wp_enqueue_style('rmh-order-lookup', plugins_url('assets/css/order-lookup.css', __FILE__), [], '2.1.4');
