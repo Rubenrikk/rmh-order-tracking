@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     1.9.4
+ * Version:     1.9.5
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -472,7 +472,7 @@ class Printcom_Order_Tracker {
                 $btn_html = '<a class="btn btn--track" href="#" aria-disabled="true" onclick="return false;">Wacht op verzending</a>';
                 if (!empty($tracks_by_item[$inum])) {
                     $first = $tracks_by_item[$inum][0];
-                    $btn_html = '<a class="btn btn--track" href="'.esc_url($first).'" target="_blank" rel="nofollow noopener">Open Track &amp; Trace</a>';
+                    $btn_html = '<a class="btn btn--track" href="'.esc_url($first).'" target="_blank" rel="nofollow noopener">Track &amp; Trace</a>';
                 }
 
                 // Render
@@ -1123,8 +1123,8 @@ class Printcom_Order_Tracker {
         .printcom-ot__grid{display:block!important}
         .printcom-ot__items::after{content:"";display:block;clear:both}
         .printcom-ot__item{display:block;border:1px solid #eee;border-radius:16px;background:#fff;padding:18px;margin:18px auto;width:100%;max-width:1100px}
-        .printcom-ot__item-grid{display:grid;grid-template-columns:300px 1fr 400px;gap:20px;align-items:start}
-        @media(max-width:1200px){.printcom-ot__item-grid{grid-template-columns:250px 1fr}}
+        .printcom-ot__item-grid{display:grid;grid-template-columns:280px 2fr 1fr;gap:20px;align-items:start}
+        @media(max-width:1200px){.printcom-ot__item-grid{grid-template-columns:220px 2fr}}
         @media(max-width:900px){.printcom-ot__item-grid{grid-template-columns:1fr}}
 
         /* Afbeelding & header */
@@ -1136,10 +1136,10 @@ class Printcom_Order_Tracker {
 
         /* Mobiel: titel → orderregel → badge (gecentreerd onder elkaar) */
         @media(max-width:600px){
-          .printcom-ot__item-header{display:flex;flex-direction:column;align-items:flex-start;text-align:left}
+          .printcom-ot__item-header{display:flex;flex-direction:column;text-align:center}
           .printcom-ot__title{order:1;margin-bottom:2px!important;}
           .printcom-ot__sub{order:2;margin-top:0!important;margin-bottom:4px!important;}
-          .printcom-ot__badge-top{order:3;position:static;display:inline-block;margin-top:4px;align-self:flex-start;}
+          .printcom-ot__badge-top{order:3;position:static;display:inline-block;margin-top:4px;}
         }
 
         /* Status-badge kleuren (per product) */
@@ -1160,7 +1160,7 @@ class Printcom_Order_Tracker {
         /* Specs: bullets uit, tekstkleur gelijk aan Extra’s */
         .printcom-ot__specs h4{color:#B71C1C}
         .printcom-ot__specs ul{list-style:none!important;margin:.2rem 0 0!important;padding-left:0!important}
-        .printcom-ot__specs li{list-style-type:none!important;color:#232323;margin:.2rem 0;padding-left:0}
+        .printcom-ot__specs li{list-style-type:none!important;color:#232323;margin:.2rem 0;padding-left:0;font-size: 1rem;line-height: 1.5;letter-spacing: normal;}
 
         /* Delivery kolom + vervoerder */
         .printcom-ot__delivery{display:flex;flex-direction:column;gap:16px}
