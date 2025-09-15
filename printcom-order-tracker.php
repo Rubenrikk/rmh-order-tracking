@@ -1011,11 +1011,15 @@ class Printcom_Order_Tracker {
     private function detect_carrier_from_track(string $url, string $method = ''): array {
         $u = strtolower($url);
         $m = strtolower($method);
-        if (strpos($u,'postnl') !== false || strpos($m,'pna_') === 0) return ['name'=>'PostNL','slug'=>'postnl'];
-        if (strpos($u,'dhl') !== false || strpos($m,'dh') === 0)     return ['name'=>'DHL','slug'=>'dhl'];
-        if (strpos($u,'dpd') !== false)                              return ['name'=>'DPD','slug'=>'dpd'];
-        if (strpos($u,'gls') !== false)                              return ['name'=>'GLS','slug'=>'gls'];
-        if (strpos($u,'ups') !== false)                              return ['name'=>'UPS','slug'=>'ups'];
+        if (strpos($u,'postnl') !== false || strpos($m,'pna_') === 0 || strpos($m,'pnl_') === 0) return ['name'=>'PostNL','slug'=>'postnl'];
+        if (strpos($u,'dhl') !== false    || strpos($m,'dh') === 0 || strpos($m,'dhg_') === 0)    return ['name'=>'DHL','slug'=>'dhl'];
+        if (strpos($u,'dpd') !== false    || strpos($m,'dpd') === 0)                               return ['name'=>'DPD','slug'=>'dpd'];
+        if (strpos($u,'gls') !== false    || strpos($m,'gls') !== false)                           return ['name'=>'GLS','slug'=>'gls'];
+        if (strpos($u,'ups') !== false    || strpos($m,'ups') === 0)                               return ['name'=>'UPS','slug'=>'ups'];
+        if (strpos($u,'fedex') !== false  || strpos($m,'fed') === 0)                              return ['name'=>'FedEx','slug'=>'fedex'];
+        if (strpos($u,'chronopost') !== false || strpos($m,'chp') === 0)                         return ['name'=>'Chronopost','slug'=>'chronopost'];
+        if (strpos($m,'nds_') === 0 || strpos($m,'npd_') === 0)                                   return ['name'=>'Leverancier','slug'=>'supplier'];
+        if (strpos($m,'rtg_') === 0)                                                              return ['name'=>'Koerier','slug'=>'courier'];
         return ['name'=>'Vervoerder','slug'=>'carrier'];
     }
 
@@ -1134,29 +1138,96 @@ class Printcom_Order_Tracker {
     }
 
     private function carrier_label_from_method(string $method): string {
+        $m = strtoupper($method);
+        $map = [
+            'DHG_EUROPLUS'      => 'DHL Zakelijk (standaard levering voor bedrijven)',
+            'DHG_FORYOU'        => 'DHL Thuislevering (overdag, particulier)',
+            'DHG_EXPRESSER'     => 'DHL Ochtendlevering (voor 12:00 uur)',
+            'DHG_CONNECT'       => 'DHL Connect (internationale levering)',
+            'DHG_FORYOU_EVE'    => 'DHL Avondlevering (tussen 18:00 en 22:00)',
+            'DHG_BUSPAKKET'     => 'DHL Brievenbuspakket (bezorgd via brievenbus, geen handtekening nodig)',
+            'DHG_EPI'           => 'DHL Pallet International (palletzending naar het buitenland)',
+            'PNA_4940'          => 'PostNL België (met handtekening voor ontvangst)',
+            'PNA_3085'          => 'PostNL Nederland Standaard (zonder handtekening)',
+            'PNA_3189'          => 'PostNL Nederland (met handtekening voor ontvangst)',
+            'PNL_4940'          => 'PostNL Internationaal (met handtekening voor ontvangst)',
+            'FED_EXPRESS'       => 'FedEx Express (ochtendlevering)',
+            'FED_PRIORITY'      => 'FedEx Priority (snelle levering, internationaal)',
+            'FED_ECONOMY'       => 'FedEx Economy (standaard levering, internationaal)',
+            'FED_ECONOMYFREIGHT'=> 'FedEx Palletlevering (internationaal, vracht/pallets)',
+            'DPD_B2C'           => 'DPD Thuislevering (particulier)',
+            'DPD_CLASSIC'       => 'DPD Zakelijk (standaard levering voor bedrijven)',
+            'DPD_1200'          => 'DPD Ochtendlevering (voor 12:00 uur)',
+            'NDS_PALLET'        => 'Palletlevering door leverancier (via verschillende vervoerders)',
+            'NPD_PACKAGE'       => 'Pakketlevering door leverancier (via verschillende vervoerders)',
+            'RTG_STANDARD'      => 'Koerier (Nederland en België, direct bezorgd)',
+            'UPS_EXPRESS'       => 'UPS Express (snelle levering, internationaal)',
+            'UPS_STANDARD'      => 'UPS Standaard (standaard levering)',
+            'UPS_SAVER'         => 'UPS Saver (express levering aan het einde van de dag)',
+            'CHP_CHRONO13'      => 'Chronopost Binnenland (levering vóór 13:00 uur)',
+            'CHP_CLASSIC'       => 'Chronopost Internationaal (standaard internationale levering)',
+        ];
+        if (isset($map[$m])) return $map[$m];
+
         $m = strtolower($method);
-        if (strpos($m,'pna_')===0 || strpos($m,'postnl')!==false) return 'PostNL';
-        if (strpos($m,'dh')===0  || strpos($m,'dhl')!==false)     return 'DHL';
-        if (strpos($m,'dpd')!==false)                              return 'DPD';
-        if (strpos($m,'gls')!==false)                              return 'GLS';
-        if (strpos($m,'ups')!==false)                              return 'UPS';
+        if (strpos($m,'pna_') === 0 || strpos($m,'pnl_') === 0 || strpos($m,'postnl') !== false) return 'PostNL';
+        if (strpos($m,'dh') === 0  || strpos($m,'dhl') !== false)     return 'DHL';
+        if (strpos($m,'dpd') === 0)                                   return 'DPD';
+        if (strpos($m,'gls') !== false)                               return 'GLS';
+        if (strpos($m,'ups') === 0)                                   return 'UPS';
+        if (strpos($m,'fed') === 0)                                   return 'FedEx';
+        if (strpos($m,'chp') === 0)                                   return 'Chronopost';
+        if (strpos($m,'nds_') === 0 || strpos($m,'npd_') === 0)       return 'Leverancier';
+        if (strpos($m,'rtg_') === 0)                                  return 'Koerier';
         return ucfirst($method ?: 'Bezorgdienst nog niet bekend');
     }
 
     private function carrier_logo_and_label(string $method): array {
         $name = $this->carrier_label_from_method($method);
-        $slug = strtolower($name);
+        $m = strtolower($method);
+
+        if (strpos($m,'pna_') === 0 || strpos($m,'pnl_') === 0 || strpos($m,'postnl') !== false) {
+            $slug = 'postnl';
+        } elseif (strpos($m,'dhg_') === 0 || strpos($m,'dhl') !== false || strpos($m,'dh') === 0) {
+            $slug = 'dhl';
+        } elseif (strpos($m,'dpd') === 0) {
+            $slug = 'dpd';
+        } elseif (strpos($m,'gls') !== false) {
+            $slug = 'gls';
+        } elseif (strpos($m,'ups') === 0) {
+            $slug = 'ups';
+        } elseif (strpos($m,'fed') === 0) {
+            $slug = 'fedex';
+        } elseif (strpos($m,'chp') === 0) {
+            $slug = 'chronopost';
+        } elseif (strpos($m,'nds_') === 0 || strpos($m,'npd_') === 0) {
+            $slug = 'supplier';
+        } elseif (strpos($m,'rtg_') === 0) {
+            $slug = 'courier';
+        } else {
+            $slug = 'carrier';
+        }
 
         $map = [
-            'postnl' => 'postnl.png',
-            'dhl'    => 'dhl.png',
-            'dpd'    => 'dpd.png',
-            'gls'    => 'gls.png',
-            'ups'    => 'ups.png',
+            'postnl'     => 'postnl.png',
+            'dhl'        => 'dhl.png',
+            'dpd'        => 'dpd.png',
+            'gls'        => 'gls.png',
+            'ups'        => 'ups.png',
+            'fedex'      => 'fedex.png',
+            'chronopost' => 'chronopost.png',
+            'supplier'   => 'supplier.png',
+            'courier'    => 'courier.png',
+            'carrier'    => 'onbekend.png',
         ];
 
-        $file = $map[$slug] ?? 'onbekend.png';
-        $url  = plugins_url('assets/carriers/'.$file, __FILE__);
+        $file     = $map[$slug] ?? 'onbekend.png';
+        $relative = 'assets/carriers/' . $file;
+        $path     = plugin_dir_path(__FILE__) . $relative;
+        if (!file_exists($path)) {
+            $relative = 'assets/carriers/onbekend.png';
+        }
+        $url = plugins_url($relative, __FILE__);
 
         return [
             'name' => $name,
