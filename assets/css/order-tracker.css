@@ -4,6 +4,9 @@
 .rmh-ot__postcode-form{margin-top:8px}
 .rmh-ot__postcode-form input{margin-right:6px;padding:4px}
 .rmh-ot__postcode-form button{padding:4px 8px}
+.rmh-ot__lookup-form{margin-top:8px}
+.rmh-ot__lookup-form input{margin-right:6px;padding:4px}
+.rmh-ot__lookup-form button{padding:4px 8px}
 .rmh-ot__items{display:flex;flex-direction:column;align-items:flex-start;}
 .rmh-ot__items h3{margin:10px 0;text-align:left!important;margin-left:0}
 .rmh-ot__grid{display:block!important}
