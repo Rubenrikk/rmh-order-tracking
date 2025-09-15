@@ -12,7 +12,7 @@
 .rmh-ot__lookup-form .required{color:#E53935}
 .rmh-ot__lookup-form input{padding:10px;border:1px solid #ddd;border-radius:8px}
 .rmh-ot__lookup-form .btn{grid-column:1/-1;width:100%;font-weight:700}
-.rmh-ot__items{display:flex;flex-direction:column;}
+.rmh-ot__items{display:flex;flex-direction:column;width:100%;max-width:1200px;margin-left:auto;margin-right:auto;}
 .rmh-ot__items h3{margin:10px 0;text-align:center;margin-left:0}
 .rmh-ot__grid{display:block!important}
 .rmh-ot__items::after{content:"";display:block;clear:both}
