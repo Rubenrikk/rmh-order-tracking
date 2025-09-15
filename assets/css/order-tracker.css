@@ -31,8 +31,8 @@
 /* Mobiel: titel → badge (gecentreerd onder elkaar) */
 @media(max-width:600px){
   .rmh-ot__item-header{display:flex;flex-direction:column;text-align:center}
-  .rmh-ot__title{order:1;margin-bottom:2px!important;}
-  .rmh-ot__badge-top{order:2;position:static;display:inline-block;margin-top:4px;}
+  .rmh-ot__badge-top{order:1;position:static;display:inline-block;margin-bottom:4px;}
+  .rmh-ot__title{order:2;margin-top:2px!important;}
 }
 
 /* Status-badge kleuren (per product) */

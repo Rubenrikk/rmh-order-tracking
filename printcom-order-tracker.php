@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     2.1.3
+ * Version:     2.1.5
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -355,41 +355,69 @@ class Printcom_Order_Tracker {
 
     /* ===== Shortcode ===== */
 
+
     public function render_lookup_shortcode() {
+        $order_val = '';
+        $postcode_val_raw = '';
         $error = '';
-        if (!empty($_POST['rmh_ot_lookup_order']) && !empty($_POST['rmh_ot_lookup_postcode'])) {
-            $order = sanitize_text_field(wp_unslash($_POST['rmh_ot_lookup_order']));
-            $maps  = get_option(self::OPT_MAPPINGS, []);
-            if (!empty($maps[$order])) {
-                $map   = $maps[$order];
-                $data  = $this->api_get_order($map['print_order']);
-                if (!is_wp_error($data)) {
-                    $addr  = $this->extract_primary_shipping_address($data);
-                    $postal= preg_replace('/\s+/','',strtoupper($addr['postcode'] ?? ''));
-                    $input = preg_replace('/\s+/','',strtoupper(sanitize_text_field(wp_unslash($_POST['rmh_ot_lookup_postcode']))));
-                    if ($input === $postal) {
-                        $url = add_query_arg('token', rawurlencode($map['token']), get_permalink((int)$map['page_id']));
-                        wp_safe_redirect($url);
-                        exit;
+        $order_invalid = false;
+        $postcode_invalid = false;
+
+        if (!empty($_POST['rmh_ol_order']) && isset($_POST['rmh_ol_postcode'])) {
+            $order_val = sanitize_text_field(wp_unslash($_POST['rmh_ol_order']));
+            $postcode_val_raw = wp_unslash($_POST['rmh_ol_postcode']);
+            $postcode_norm = strtoupper(preg_replace('/\\s+/', '', sanitize_text_field($postcode_val_raw)));
+
+            if ($order_val === '') {
+                $error = 'Vul een ordernummer in.';
+                $order_invalid = true;
+            } elseif (!preg_match('/^[0-9]{4}[A-Z]{2}$/', $postcode_norm)) {
+                $error = 'Vul een geldige postcode in (bijv. 1234AB).';
+                $postcode_invalid = true;
+            } else {
+                $maps = get_option(self::OPT_MAPPINGS, []);
+                if (!empty($maps[$order_val])) {
+                    $map  = $maps[$order_val];
+                    $data = $this->api_get_order($map['print_order']);
+                    if (!is_wp_error($data)) {
+                        $addr   = $this->extract_primary_shipping_address($data);
+                        $postal = strtoupper(preg_replace('/\\s+/', '', $addr['postcode'] ?? ''));
+                        if ($postcode_norm === $postal) {
+                            $url = add_query_arg('token', rawurlencode($map['token']), get_permalink((int)$map['page_id']));
+                            wp_safe_redirect($url);
+                            exit;
+                        }
                     }
                 }
+                $error = 'We hebben geen bestelling gevonden met deze combinatie.';
+                $order_invalid = $postcode_invalid = true;
             }
-            $error = '<div class="rmh-ot rmh-ot--error">Onbekend ordernummer of postcode.</div>';
         }
-        $form  = '<form class="rmh-ot__lookup-form" method="post">';
-        $form .= '<div class="rmh-ot__field">';
-        $form .=   '<label for="rmh_ot_lookup_order">Ordernummer <span class="required">*</span></label>';
-        $form .=   '<input type="text" id="rmh_ot_lookup_order" name="rmh_ot_lookup_order" placeholder="RMH-12345" required />';
-        $form .= '</div>';
-        $form .= '<div class="rmh-ot__field">';
-        $form .=   '<label for="rmh_ot_lookup_postcode">Postcode <span class="required">*</span></label>';
-        $form .=   '<input type="text" id="rmh_ot_lookup_postcode" name="rmh_ot_lookup_postcode" placeholder="1234AB" required />';
-        $form .= '</div>';
-        $form .= '<button type="submit" class="btn btn--track">Zoek bestelling</button>';
-        $form .= '</form>';
-        return $error . $form;
-    }
 
+        $order_attr = $order_invalid ? ' aria-invalid="true"' : '';
+        $postcode_attr = $postcode_invalid ? ' aria-invalid="true"' : '';
+
+        $html  = '<div class="rmh-order-lookup">';
+        $html .= '<h2 class="rmh-ol__title">Bestelling zoeken</h2>';
+        $html .= '<div class="rmh-ol__feedback' . ($error ? ' rmh-ol__feedback--error' : '') . '" aria-live="polite">' . ($error ? esc_html($error) : '') . '</div>';
+        $html .= '<form class="rmh-ol__form" method="post">';
+        $html .=   '<div class="rmh-ol__row">';
+        $html .=     '<div class="rmh-ol__field">';
+        $html .=       '<label class="rmh-ol__label" for="rmh_ol_order">Ordernummer <span aria-hidden="true">*</span></label>';
+        $html .=       '<input class="rmh-ol__input" type="text" id="rmh_ol_order" name="rmh_ol_order" placeholder="RMH-12345 of factuurnummer" required' . $order_attr . ' value="' . esc_attr($order_val) . '" />';
+        $html .=       '<p class="rmh-ol__hint">Bijv. RMH-12345 of factuurnummer</p>';
+        $html .=     '</div>';
+        $html .=     '<div class="rmh-ol__field">';
+        $html .=       '<label class="rmh-ol__label" for="rmh_ol_postcode">Postcode <span aria-hidden="true">*</span></label>';
+        $html .=       '<input class="rmh-ol__input" type="text" id="rmh_ol_postcode" name="rmh_ol_postcode" placeholder="1234AB, zonder spatie" pattern="^[0-9]{4}[A-Za-z]{2}$" required' . $postcode_attr . ' value="' . esc_attr($postcode_val_raw) . '" />';
+        $html .=       '<p class="rmh-ol__hint">1234AB, zonder spatie</p>';
+        $html .=     '</div>';
+        $html .=   '</div>';
+        $html .=   '<div class="rmh-ol__actions"><button type="submit" class="rmh-ol__btn">Zoek bestelling</button></div>';
+        $html .= '</form>';
+        $html .= '</div>';
+        return $html;
+    }
     public function render_order_shortcode($atts=[]) {
         $atts = shortcode_atts(['order'=>''], $atts, 'print_order_status');
         $own = trim($atts['order']);
@@ -1158,7 +1186,15 @@ class Printcom_Order_Tracker {
     /* ===== Styles ===== */
 
     public function enqueue_styles() {
-        wp_enqueue_style('rmh-ot-style', plugins_url('assets/css/order-tracker.css', __FILE__), [], '1.0');
+        if (!is_singular()) return;
+        global $post;
+        $content = $post->post_content ?? '';
+        if (has_shortcode($content, 'print_order_status')) {
+            wp_enqueue_style('rmh-ot-style', plugins_url('assets/css/order-tracker.css', __FILE__), [], '1.0');
+        }
+        if (has_shortcode($content, 'print_order_lookup')) {
+            wp_enqueue_style('rmh-order-lookup', plugins_url('assets/css/order-lookup.css', __FILE__), [], '2.1.4');
+        }
     }
 
     /* ===== HTTP helpers ===== */
