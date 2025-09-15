@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     2.2.0
+ * Version:     2.2.1
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -18,6 +18,9 @@ class Printcom_Order_Tracker {
     const TRANSIENT_PREFIX = 'printcom_ot_cache_';
     const META_IMG_ID      = '_printcom_ot_image_id';    // (legacy) 1 afbeelding voor de hele pagina
     const META_ITEM_IMGS   = '_printcom_ot_item_images'; // per product (orderItemNumber => attachment_id)
+
+    /** @var int[]|null Cached lijst met door de plugin beheerde orderpagina's (per request). */
+    private $managed_page_ids = null;
 
     public function __construct() {
         add_action('admin_menu', [$this, 'admin_menu']);
@@ -151,7 +154,10 @@ class Printcom_Order_Tracker {
                 $chg=true;
             }
         }
-        if($chg) update_option(self::OPT_MAPPINGS,$m,false);
+        if($chg){
+            update_option(self::OPT_MAPPINGS,$m,false);
+            $this->reset_managed_page_cache();
+        }
 
         $msg='';
         if (!empty($_POST['rmh_ot_my_order']) && !empty($_POST['rmh_ot_print_order']) && check_admin_referer('printcom_ot_new_order_action','printcom_ot_nonce')) {
@@ -258,6 +264,7 @@ class Printcom_Order_Tracker {
 
         $mappings[$ownOrder] = ['page_id'=>(int)$page_id,'print_order'=>$printOrder,'token'=>$token];
         update_option(self::OPT_MAPPINGS, $mappings, false);
+        $this->reset_managed_page_cache();
 
         $this->apply_divi_fullwidth_no_sidebar((int)$page_id);
         return [(int)$page_id,$token];
@@ -277,6 +284,7 @@ class Printcom_Order_Tracker {
 
         unset($m[$ownOrder]);
         update_option(self::OPT_MAPPINGS, $m, false);
+        $this->reset_managed_page_cache();
 
         if ($print) {
             delete_transient(self::TRANSIENT_PREFIX.md5($print));
@@ -314,9 +322,9 @@ class Printcom_Order_Tracker {
         if ($post->post_type !== 'page') return;
 
         // Alleen afdwingen voor door de plugin beheerde orderpagina’s
-        $maps = get_option(self::OPT_MAPPINGS, []);
-        $pids = array_map(fn($i)=> (int)($i['page_id']??0), $maps);
-        if (!in_array((int)$post_ID, $pids, true)) return;
+        if (!$this->is_managed_order_page($post_ID)) {
+            return;
+        }
 
         $this->apply_divi_fullwidth_no_sidebar((int)$post_ID);
     }
@@ -324,10 +332,8 @@ class Printcom_Order_Tracker {
     public function force_divi_template_for_orders($template) {
         if (!is_page()) return $template;
 
-        $maps = get_option(self::OPT_MAPPINGS, []);
         $pid  = get_queried_object_id();
-        $pids = array_map(fn($i)=> (int)($i['page_id']??0), $maps);
-        if (!$pid || !in_array((int)$pid, $pids, true)) {
+        if (!$pid || !$this->is_managed_order_page($pid)) {
             return $template;
         }
 
@@ -342,15 +348,51 @@ class Printcom_Order_Tracker {
     public function force_divi_body_classes_for_orders(array $classes) : array {
         if (!is_page()) return $classes;
 
-        $maps = get_option(self::OPT_MAPPINGS, []);
         $pid  = get_queried_object_id();
-        $pids = array_map(fn($i)=> (int)($i['page_id']??0), $maps);
-        if ($pid && in_array((int)$pid, $pids, true)) {
+        if ($pid && $this->is_managed_order_page($pid)) {
             // Tell Divi “no sidebar + full-width” via classes, regardless of UI state
             $classes[] = 'et_full_width_page';
             $classes[] = 'et_no_sidebar';
         }
         return $classes;
+    }
+
+    /* ===== Helpers voor orderpagina's ===== */
+
+    private function reset_managed_page_cache(): void {
+        $this->managed_page_ids = null;
+    }
+
+    private function get_managed_page_ids(): array {
+        if (is_array($this->managed_page_ids)) {
+            return $this->managed_page_ids;
+        }
+
+        $maps = get_option(self::OPT_MAPPINGS, []);
+        $ids  = [];
+
+        foreach ($maps as $info) {
+            if (!is_array($info)) {
+                continue;
+            }
+            $pid = isset($info['page_id']) ? (int)$info['page_id'] : 0;
+            if ($pid > 0) {
+                $ids[] = $pid;
+            }
+        }
+
+        $this->managed_page_ids = $ids;
+
+        return $ids;
+    }
+
+    private function is_managed_order_page($post_id): bool {
+        $pid = (int)$post_id;
+        if ($pid <= 0) {
+            return false;
+        }
+
+        return in_array($pid, $this->get_managed_page_ids(), true);
     }
 
     /* ===== Shortcode ===== */
@@ -426,21 +468,17 @@ class Printcom_Order_Tracker {
         $orderNum       = $map['print_order'];
         $requestedToken = isset($_GET['token']) ? sanitize_text_field(wp_unslash($_GET['token'])) : '';
         $valid          = is_user_logged_in() || ($requestedToken !== '' && $requestedToken === $token);
-        $cache_key=self::TRANSIENT_PREFIX.md5($orderNum);
-        $data=null;
-
         if (!$valid) {
             wp_safe_redirect( home_url( '/bestellingen' ) );
             exit;
         }
 
-        if(!$data){
-            $data=get_transient($cache_key);
-            if(!$data){
-                $data=$this->api_get_order($orderNum);
-                if(is_wp_error($data)) return '<div class="rmh-ot rmh-ot--error">Kon ordergegevens niet ophalen. '.esc_html($data->get_error_message()).'</div>';
-                set_transient($cache_key,$data,$this->dynamic_cache_ttl_for($data));
-            }
+        $cache_key = self::TRANSIENT_PREFIX.md5($orderNum);
+        $data = get_transient($cache_key);
+        if (!is_array($data)) {
+            $data = $this->api_get_order($orderNum);
+            if(is_wp_error($data)) return '<div class="rmh-ot rmh-ot--error">Kon ordergegevens niet ophalen. '.esc_html($data->get_error_message()).'</div>';
+            set_transient($cache_key,$data,$this->dynamic_cache_ttl_for($data));
         }
         
         $overall_delivery = $this->render_delivery_window_range($data['shipments'] ?? []);
@@ -668,24 +706,6 @@ class Printcom_Order_Tracker {
             $label = ($qty === 1 ? ($tr['titleSingle'] ?? $name) : ($tr['titlePlural'] ?? $name));
         }
         return $label;
-    }
-
-    private function render_options_compact($options, $translation) : string {
-        if (!is_array($options) || !$options) return '';
-        $pairs=[]; $max=6;
-        $labels = is_array($translation) ? $translation : [];
-
-        foreach ($options as $key=>$val) {
-            if (!is_scalar($val) || $val==='') continue;
-
-            // Probeer label te vinden uit productTranslation: "property.<key>" en evt. "property.<key>.option.<value>"
-            $prop_label = $labels['property.'.$key] ?? $key;
-            $opt_label  = $labels['property.'.$key.'.option.'.$val] ?? $val;
-
-            $pairs[] = '<span class="rmh-ot__chip">'.esc_html($prop_label).': '.esc_html((string)$opt_label).'</span>';
-            if (count($pairs) >= $max) break;
-        }
-        return $pairs ? '<div class="rmh-ot__chips">'.implode(' ',$pairs).'</div>' : '';
     }
 
     private function human_status(array $order) : string {
@@ -1113,21 +1133,6 @@ class Printcom_Order_Tracker {
         }
 
         return ['eigenschappen'=>$eig, 'extras'=>$extra];
-    }
-
-    private function detect_carrier_from_track(string $url, string $method = ''): array {
-        $u = strtolower($url);
-        $m = strtolower($method);
-        if (strpos($u,'postnl') !== false || strpos($m,'pna_') === 0 || strpos($m,'pnl_') === 0) return ['name'=>'PostNL','slug'=>'postnl'];
-        if (strpos($u,'dhl') !== false    || strpos($m,'dh') === 0 || strpos($m,'dhg_') === 0)    return ['name'=>'DHL','slug'=>'dhl'];
-        if (strpos($u,'dpd') !== false    || strpos($m,'dpd') === 0)                               return ['name'=>'DPD','slug'=>'dpd'];
-        if (strpos($u,'gls') !== false    || strpos($m,'gls') !== false)                           return ['name'=>'GLS','slug'=>'gls'];
-        if (strpos($u,'ups') !== false    || strpos($m,'ups') === 0)                               return ['name'=>'UPS','slug'=>'ups'];
-        if (strpos($u,'fedex') !== false  || strpos($m,'fed') === 0)                              return ['name'=>'FedEx','slug'=>'fedex'];
-        if (strpos($u,'chronopost') !== false || strpos($m,'chp') === 0)                         return ['name'=>'Chronopost','slug'=>'chronopost'];
-        if (strpos($m,'nds_') === 0 || strpos($m,'npd_') === 0)                                   return ['name'=>'Leverancier','slug'=>'supplier'];
-        if (strpos($m,'rtg_') === 0)                                                              return ['name'=>'Koerier','slug'=>'courier'];
-        return ['name'=>'Vervoerder','slug'=>'carrier'];
     }
 
     private function fmt_date_ymdh(string $s): ?DateTime {
