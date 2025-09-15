@@ -21,7 +21,7 @@
 @media(max-width:1200px)and(min-width:901px){.rmh-ot__photo{max-width: 200px;}}
 .rmh-ot__title{font-size:1.8rem;font-weight:800;margin:0}
 .rmh-ot__item-header{position:relative;margin-bottom:.5rem}
-.rmh-ot__badge-top{position:absolute;right:18px;top:18px} /* desktop/tablet */
+.rmh-ot__badge-top{position:absolute;right:18px;} /* desktop/tablet */
 
 /* Mobiel: titel → badge (gecentreerd onder elkaar) */
 @media(max-width:600px){
