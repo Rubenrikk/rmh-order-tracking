@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     2.0.0
+ * Version:     2.0.1
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -371,19 +371,38 @@ class Printcom_Order_Tracker {
 
         $maps = get_option(self::OPT_MAPPINGS, []);
         if (empty($maps[$own])) return '<div class="rmh-ot rmh-ot--error">Onbekend ordernummer.</div>';
-        $map = $maps[$own];
-        $token = $map['token'] ?? '';
-        if (empty($_GET['token']) || sanitize_text_field(wp_unslash($_GET['token'])) !== $token) {
-            return '<div class="rmh-ot rmh-ot--error">Onjuiste link.</div>';
-        }
+        $map      = $maps[$own];
+        $token    = $map['token'] ?? '';
         $orderNum = $map['print_order'];
-
+        $valid    = !empty($_GET['token']) && sanitize_text_field(wp_unslash($_GET['token'])) === $token;
         $cache_key=self::TRANSIENT_PREFIX.md5($orderNum);
-        $data=get_transient($cache_key);
+        $data=null;
+
+        if (!$valid && !empty($_POST['rmh_ot_postcode'])) {
+            $data=get_transient($cache_key);
+            if(!$data){
+                $data=$this->api_get_order($orderNum);
+                if(is_wp_error($data)) return '<div class="rmh-ot rmh-ot--error">Kon ordergegevens niet ophalen. '.esc_html($data->get_error_message()).'</div>';
+                set_transient($cache_key,$data,$this->dynamic_cache_ttl_for($data));
+            }
+            $addr=$this->extract_primary_shipping_address($data);
+            $postal=preg_replace('/\s+/','',strtoupper($addr['postcode']??''));
+            $input=preg_replace('/\s+/','',strtoupper(sanitize_text_field(wp_unslash($_POST['rmh_ot_postcode']))));
+            if($input===$postal) $valid=true;
+        }
+
+        if(!$valid){
+            $form='<form class="rmh-ot__postcode-form" method="post"><label for="rmh_ot_postcode">Geen link? Vul je postcode in:</label> <input type="text" id="rmh_ot_postcode" name="rmh_ot_postcode" required/> <button type="submit">Toon bestelling</button></form>';
+            return '<div class="rmh-ot rmh-ot--error">Onjuiste link. Gebruik de link uit de e-mail om je bestelling te bekijken.' . $form . '</div>';
+        }
+
         if(!$data){
-            $data=$this->api_get_order($orderNum);
-            if(is_wp_error($data)) return '<div class="rmh-ot rmh-ot--error">Kon ordergegevens niet ophalen. '.esc_html($data->get_error_message()).'</div>';
-            set_transient($cache_key,$data,$this->dynamic_cache_ttl_for($data));
+            $data=get_transient($cache_key);
+            if(!$data){
+                $data=$this->api_get_order($orderNum);
+                if(is_wp_error($data)) return '<div class="rmh-ot rmh-ot--error">Kon ordergegevens niet ophalen. '.esc_html($data->get_error_message()).'</div>';
+                set_transient($cache_key,$data,$this->dynamic_cache_ttl_for($data));
+            }
         }
         
         $overall_delivery = $this->render_delivery_window_range($data['shipments'] ?? []);
@@ -494,7 +513,6 @@ class Printcom_Order_Tracker {
                 $html .=   '<div class="rmh-ot__item-header">';
                 $html .=     '<div class="rmh-ot__badge-top">'.$status_badge.'</div>';
                 $html .=     '<h2 class="rmh-ot__title">'.$n.'. '.esc_html($title).'</h2>';
-                if ($inum)  $html .=     '<div class="rmh-ot__sub">'.esc_html($inum).'</div>';
                 $html .=   '</div>';
 
                 $html .=   '<div class="rmh-ot__item-grid">';
