@@ -221,8 +221,12 @@ class Printcom_Order_Tracker {
         if (!empty($_POST['rmh_ot_my_order']) && !empty($_POST['rmh_ot_print_order']) && check_admin_referer('printcom_ot_new_order_action','printcom_ot_nonce')) {
             $my=sanitize_text_field($_POST['rmh_ot_my_order']);
             $print=sanitize_text_field($_POST['rmh_ot_print_order']);
+            $invoice='';
+            if (isset($_POST['rmh_ot_invoice_number'])) {
+                $invoice=sanitize_text_field($_POST['rmh_ot_invoice_number']);
+            }
             if ($my!=='' && $print!=='') {
-                $res=$this->create_or_update_page_for_order($my,$print);
+                $res=$this->create_or_update_page_for_order($my,$print,$invoice);
                 if ($res){ [$page_id,$token]=$res; $url=add_query_arg('token',rawurlencode($token),get_permalink($page_id)); $msg=sprintf('Pagina voor order <strong>%s</strong> is aangemaakt/bijgewerkt: <a href="%s" target="_blank" rel="noopener">%s</a>',esc_html($my),esc_url($url),esc_html($url)); }
                 else { $msg='Er ging iets mis bij het aanmaken of bijwerken van de pagina.'; }
             }
@@ -242,6 +246,7 @@ class Printcom_Order_Tracker {
                 <table class="form-table">
                     <tr><th><label for="rmh_ot_my_order">Eigen ordernummer</label></th><td><input type="text" id="rmh_ot_my_order" name="rmh_ot_my_order" class="regular-text" required/></td></tr>
                     <tr><th><label for="rmh_ot_print_order">Print.com ordernummer</label></th><td><input type="text" id="rmh_ot_print_order" name="rmh_ot_print_order" class="regular-text" required/><p class="description">Koppel jouw ordernummer aan een Print.com order.</p></td></tr>
+                    <tr><th><label for="rmh_ot_invoice_number">Invoice Ninja factuurnummer</label></th><td><input type="text" id="rmh_ot_invoice_number" name="rmh_ot_invoice_number" class="regular-text"/><p class="description">Optioneel: gebruik dit om direct de juiste Invoice Ninja factuur te koppelen.</p></td></tr>
                 </table>
                 <?php submit_button('Pagina aanmaken/bijwerken'); ?>
             </form>
@@ -279,8 +284,9 @@ class Printcom_Order_Tracker {
         <?php
     }
 
-    private function create_or_update_page_for_order(string $ownOrder, string $printOrder) {
+    private function create_or_update_page_for_order(string $ownOrder, string $printOrder, string $invoiceNumber = '') {
         $mappings = get_option(self::OPT_MAPPINGS, []);
+        $existing_entry = isset($mappings[$ownOrder]) && is_array($mappings[$ownOrder]) ? $mappings[$ownOrder] : [];
         $title    = 'Bestelling '.$ownOrder;
         $shortcode= sprintf('[print_order_status order="%s"]', esc_attr($ownOrder));
 
@@ -288,7 +294,7 @@ class Printcom_Order_Tracker {
         $parent = get_page_by_path('bestellingen');
         if ($parent) { $parent_id = (int)$parent->ID; }
 
-        $token = $mappings[$ownOrder]['token'] ?? wp_generate_password(20,false,false);
+        $token = $existing_entry['token'] ?? wp_generate_password(20,false,false);
 
         if (isset($mappings[$ownOrder]) && get_post_status((int)$mappings[$ownOrder]['page_id'])) {
             $page_id = (int)$mappings[$ownOrder]['page_id'];
@@ -320,7 +326,17 @@ class Printcom_Order_Tracker {
             if (is_wp_error($page_id) || !$page_id) return false;
         }
 
-        $mappings[$ownOrder] = ['page_id'=>(int)$page_id,'print_order'=>$printOrder,'token'=>$token];
+        $invoiceNumber = trim(sanitize_text_field($invoiceNumber));
+
+        $entry = is_array($existing_entry) ? $existing_entry : [];
+        $entry['page_id']    = (int)$page_id;
+        $entry['print_order']= $printOrder;
+        $entry['token']      = $token;
+        if ($invoiceNumber !== '') {
+            $entry['invoice_id'] = $invoiceNumber;
+        }
+
+        $mappings[$ownOrder] = $entry;
         update_option(self::OPT_MAPPINGS, $mappings, false);
         $this->reset_managed_page_cache();
 
@@ -551,19 +567,27 @@ class Printcom_Order_Tracker {
         $nl_status = $this->human_status($data); // geeft NL: "Deels verzonden", "Verzonden", etc.
 
         $invoice_cta_html = '';
+        $invoice_hint_html = '';
+        $invoice_link_found = false;
+        $invoice_client_available = false;
         if (function_exists('rmh_get_invoice_ninja_client_singleton')) {
             $client = rmh_get_invoice_ninja_client_singleton();
             if ($client instanceof RMH_InvoiceNinja_Client) {
+                $invoice_client_available = true;
                 $invoice_id = $this->resolve_invoice_ninja_invoice_id($map, $data, $own, $orderNum);
                 if ($invoice_id) {
                     $details = $client->get_invoice_portal_details($invoice_id);
                     if (is_array($details) && !empty($details['link'])) {
+                        $invoice_link_found = true;
                         $is_paid = $details['is_paid'] ?? null;
                         $button_text = ($is_paid === true) ? 'Bekijk factuur' : 'Bekijk en betaal factuur';
                         $invoice_cta_html = '<div class="rmh-invoice-cta"><a class="rmh-btn rmh-btn-pay" target="_blank" rel="noopener" href="' . esc_url($details['link']) . '">' . esc_html($button_text) . '</a></div>';
                     }
                 }
             }
+        }
+        if (!$invoice_link_found && $invoice_client_available && current_user_can('manage_options')) {
+            $invoice_hint_html = '<p class="rmh-invoice-admin-hint">' . esc_html('Invoice Ninja: geen portal-link gevonden voor deze order. Controleer de factuurnummer-koppeling.') . '</p>';
         }
     
 
@@ -769,6 +793,9 @@ class Printcom_Order_Tracker {
             $html .= '<p><em>Er zijn nog geen producten geregistreerd voor deze bestelling.</em></p>';
         }
         $html .= '</div>'; // items
+        if ($invoice_hint_html !== '') {
+            $html .= $invoice_hint_html;
+        }
         $html .= '</div>'; // wrapper
 
         return $html;
