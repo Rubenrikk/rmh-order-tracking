@@ -65,10 +65,16 @@ class RMH_InvoiceNinja_Client {
             return null;
         }
 
-        $cache_key = 'rmh_in_invit_' . md5( $invoice );
+        $cache_key         = 'rmh_in_invit_' . md5( $invoice );
+        $resolved_cache_key = 'rmh_in_invoice_id_' . md5( $invoice );
+
         if ( $this->cache_ttl > 0 ) {
             $cached = get_transient( $cache_key );
             if ( is_array( $cached ) ) {
+                if ( ! empty( $cached['missing'] ) ) {
+                    return null;
+                }
+
                 $link    = isset( $cached['link'] ) && is_string( $cached['link'] ) ? trim( $cached['link'] ) : '';
                 $is_paid = null;
                 if ( array_key_exists( 'is_paid', $cached ) ) {
@@ -93,8 +99,209 @@ class RMH_InvoiceNinja_Client {
             }
         }
 
-        $url  = $this->base_url . '/api/v1/invoices/' . rawurlencode( $invoice ) . '?include=invitations';
-        $args = [
+        $resolved_invoice = $invoice;
+        if ( $this->cache_ttl > 0 ) {
+            $cached_resolved = get_transient( $resolved_cache_key );
+            if ( is_string( $cached_resolved ) && $cached_resolved !== '' ) {
+                if ( '__missing__' === $cached_resolved ) {
+                    return null;
+                }
+
+                $resolved_invoice = $cached_resolved;
+            }
+        }
+
+        $attempted_number_lookup = false;
+
+        while ( true ) {
+            $response = $this->request_invoice_by_id( $resolved_invoice );
+            if ( is_wp_error( $response ) ) {
+                error_log( '[RMH Invoice Ninja] HTTP error for invoice ' . sanitize_text_field( $resolved_invoice ) . ': ' . $response->get_error_message() );
+                return null;
+            }
+
+            $status = (int) wp_remote_retrieve_response_code( $response );
+            if ( $status >= 200 && $status < 300 ) {
+                $body = wp_remote_retrieve_body( $response );
+                $data = json_decode( $body, true );
+                if ( ! is_array( $data ) ) {
+                    error_log( '[RMH Invoice Ninja] Invalid JSON response for invoice ' . sanitize_text_field( $resolved_invoice ) . '.' );
+                    return null;
+                }
+
+                $invitation = $this->extract_first_invitation( $data );
+                if ( ! $invitation ) {
+                    error_log( '[RMH Invoice Ninja] No invitation found for invoice ' . sanitize_text_field( $resolved_invoice ) . '.' );
+                    return null;
+                }
+
+                $link = '';
+                if ( ! empty( $invitation['link'] ) ) {
+                    $link = (string) $invitation['link'];
+                } elseif ( ! empty( $invitation['key'] ) ) {
+                    $link = $this->base_url . '/client/invoice/' . rawurlencode( (string) $invitation['key'] );
+                }
+
+                $link = trim( $link );
+                if ( $link === '' ) {
+                    error_log( '[RMH Invoice Ninja] Invitation missing link for invoice ' . sanitize_text_field( $resolved_invoice ) . '.' );
+                    return null;
+                }
+
+                $is_paid = $this->determine_invoice_paid_status( $data );
+
+                $details = [
+                    'link'       => $link,
+                    'is_paid'    => $is_paid,
+                    'invoice_id' => $resolved_invoice,
+                ];
+
+                if ( $this->cache_ttl > 0 ) {
+                    set_transient( $cache_key, $details, $this->cache_ttl );
+                    set_transient( $resolved_cache_key, $resolved_invoice, $this->cache_ttl );
+                }
+
+                return [
+                    'link'    => $link,
+                    'is_paid' => $is_paid,
+                ];
+            }
+
+            if ( ( 404 === $status || 422 === $status ) && ! $attempted_number_lookup && $resolved_invoice === $invoice ) {
+                $lookup = $this->lookup_invoice_id_by_number( $invoice );
+                if ( 'found' === $lookup['status'] && is_string( $lookup['id'] ) && $lookup['id'] !== '' ) {
+                    $resolved_invoice       = $lookup['id'];
+                    $attempted_number_lookup = true;
+                    if ( $this->cache_ttl > 0 ) {
+                        set_transient( $resolved_cache_key, $resolved_invoice, $this->cache_ttl );
+                    }
+                    continue;
+                }
+
+                if ( 'not_found' === $lookup['status'] ) {
+                    $this->store_invoice_lookup_miss( $cache_key, $resolved_cache_key );
+                    error_log( '[RMH Invoice Ninja] No invoice found for number ' . sanitize_text_field( $invoice ) . '.' );
+                    return null;
+                }
+
+                return null;
+            }
+
+            if ( 404 === $status || 422 === $status ) {
+                $this->store_invoice_lookup_miss( $cache_key, $resolved_cache_key );
+                error_log( '[RMH Invoice Ninja] Invoice ' . sanitize_text_field( $resolved_invoice ) . ' not found.' );
+                return null;
+            }
+
+            error_log( '[RMH Invoice Ninja] Unexpected status ' . $status . ' for invoice ' . sanitize_text_field( $resolved_invoice ) . '.' );
+            return null;
+        }
+    }
+
+    /**
+     * Perform the Invoice Ninja API request for a specific invoice ID.
+     *
+     * @param string $invoice_id Invoice identifier (hashed ID).
+     * @return array|WP_Error
+     */
+    private function request_invoice_by_id( string $invoice_id ) {
+        $url = $this->base_url . '/api/v1/invoices/' . rawurlencode( $invoice_id ) . '?include=invitations';
+
+        return wp_remote_get( $url, $this->get_default_request_args() );
+    }
+
+    /**
+     * Lookup an invoice ID by its visible invoice number.
+     *
+     * @param string $invoice_number Human-readable invoice number.
+     * @return array{status:'found'|'not_found'|'error',id:?string}
+     */
+    private function lookup_invoice_id_by_number( string $invoice_number ): array {
+        $params = [
+            'invoice_number' => $invoice_number,
+            'number'         => $invoice_number,
+        ];
+
+        foreach ( $params as $param => $value ) {
+            $url      = $this->base_url . '/api/v1/invoices?' . rawurlencode( $param ) . '=' . rawurlencode( $value );
+            $response = wp_remote_get( $url, $this->get_default_request_args() );
+
+            if ( is_wp_error( $response ) ) {
+                error_log( '[RMH Invoice Ninja] HTTP error while searching for invoice ' . sanitize_text_field( $invoice_number ) . ': ' . $response->get_error_message() );
+                return [
+                    'status' => 'error',
+                    'id'     => null,
+                ];
+            }
+
+            $status = (int) wp_remote_retrieve_response_code( $response );
+            if ( $status === 404 ) {
+                continue;
+            }
+
+            if ( $status < 200 || $status >= 300 ) {
+                error_log( '[RMH Invoice Ninja] Unexpected status ' . $status . ' while searching for invoice ' . sanitize_text_field( $invoice_number ) . '.' );
+                return [
+                    'status' => 'error',
+                    'id'     => null,
+                ];
+            }
+
+            $body = wp_remote_retrieve_body( $response );
+            $data = json_decode( $body, true );
+            if ( ! is_array( $data ) ) {
+                error_log( '[RMH Invoice Ninja] Invalid JSON while searching for invoice ' . sanitize_text_field( $invoice_number ) . '.' );
+                return [
+                    'status' => 'error',
+                    'id'     => null,
+                ];
+            }
+
+            $records = $data['data'] ?? $data;
+            if ( is_array( $records ) && isset( $records['data'] ) && is_array( $records['data'] ) ) {
+                $records = $records['data'];
+            }
+
+            if ( is_array( $records ) && isset( $records['id'] ) && ! isset( $records[0] ) ) {
+                $candidate = $this->extract_string_value( $records, [ 'id', 'hashed_id' ] );
+                if ( null !== $candidate && $candidate !== '' ) {
+                    return [
+                        'status' => 'found',
+                        'id'     => trim( (string) $candidate ),
+                    ];
+                }
+            }
+
+            if ( is_array( $records ) ) {
+                foreach ( $records as $record ) {
+                    if ( ! is_array( $record ) ) {
+                        continue;
+                    }
+
+                    $candidate = $this->extract_string_value( $record, [ 'id', 'hashed_id' ] );
+                    if ( null !== $candidate && $candidate !== '' ) {
+                        return [
+                            'status' => 'found',
+                            'id'     => trim( (string) $candidate ),
+                        ];
+                    }
+                }
+            }
+        }
+
+        return [
+            'status' => 'not_found',
+            'id'     => null,
+        ];
+    }
+
+    /**
+     * Default arguments for API requests.
+     *
+     * @return array
+     */
+    private function get_default_request_args(): array {
+        return [
             'timeout' => 10,
             'headers' => [
                 'X-API-Token'      => $this->api_token,
@@ -103,57 +310,22 @@ class RMH_InvoiceNinja_Client {
                 'User-Agent'       => 'RMH-Order-Tracker (+WordPress)',
             ],
         ];
+    }
 
-        $response = wp_remote_get( $url, $args );
-        if ( is_wp_error( $response ) ) {
-            error_log( '[RMH Invoice Ninja] HTTP error for invoice ' . sanitize_text_field( $invoice ) . ': ' . $response->get_error_message() );
-            return null;
+    /**
+     * Cache a failed lookup to avoid repeated API calls for missing invoices.
+     *
+     * @param string $cache_key         Cache key for invitation details.
+     * @param string $resolved_cache_key Cache key for resolved invoice IDs.
+     * @return void
+     */
+    private function store_invoice_lookup_miss( string $cache_key, string $resolved_cache_key ): void {
+        if ( $this->cache_ttl <= 0 ) {
+            return;
         }
 
-        $status = wp_remote_retrieve_response_code( $response );
-        if ( $status < 200 || $status >= 300 ) {
-            error_log( '[RMH Invoice Ninja] Unexpected status ' . $status . ' for invoice ' . sanitize_text_field( $invoice ) . '.' );
-            return null;
-        }
-
-        $body = wp_remote_retrieve_body( $response );
-        $data = json_decode( $body, true );
-        if ( ! is_array( $data ) ) {
-            error_log( '[RMH Invoice Ninja] Invalid JSON response for invoice ' . sanitize_text_field( $invoice ) . '.' );
-            return null;
-        }
-
-        $invitation = $this->extract_first_invitation( $data );
-        if ( ! $invitation ) {
-            error_log( '[RMH Invoice Ninja] No invitation found for invoice ' . sanitize_text_field( $invoice ) . '.' );
-            return null;
-        }
-
-        $link = '';
-        if ( ! empty( $invitation['link'] ) ) {
-            $link = (string) $invitation['link'];
-        } elseif ( ! empty( $invitation['key'] ) ) {
-            $link = $this->base_url . '/client/invoice/' . rawurlencode( (string) $invitation['key'] );
-        }
-
-        $link = trim( $link );
-        if ( $link === '' ) {
-            error_log( '[RMH Invoice Ninja] Invitation missing link for invoice ' . sanitize_text_field( $invoice ) . '.' );
-            return null;
-        }
-
-        $is_paid = $this->determine_invoice_paid_status( $data );
-
-        $details = [
-            'link'    => $link,
-            'is_paid' => $is_paid,
-        ];
-
-        if ( $this->cache_ttl > 0 ) {
-            set_transient( $cache_key, $details, $this->cache_ttl );
-        }
-
-        return $details;
+        set_transient( $cache_key, [ 'missing' => true ], $this->cache_ttl );
+        set_transient( $resolved_cache_key, '__missing__', $this->cache_ttl );
     }
 
     /**
