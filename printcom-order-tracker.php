@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     2.3.1
+ * Version:     2.3.2
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -163,16 +163,11 @@ class Printcom_Order_Tracker {
             <form method="post" action="options.php">
                 <?php settings_fields(self::OPT_SETTINGS); do_settings_sections(self::OPT_SETTINGS); submit_button(); ?>
             </form>
-            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="margin-top:10px;">
-                <?php wp_nonce_field('rmh_in_test_connection','rmh_in_test_connection_nonce'); ?>
-                <input type="hidden" name="action" value="rmh_in_test_connection"/>
-                <button class="button button-secondary">Test verbinding</button>
-            </form>
             <hr/>
             <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="margin-top:10px;">
                 <?php wp_nonce_field('printcom_ot_test_conn','printcom_ot_test_conn_nonce'); ?>
                 <input type="hidden" name="action" value="printcom_ot_test_connection"/>
-                <button class="button button-secondary">Verbinding testen</button>
+                <button class="button button-secondary">Print.com verbinding testen</button>
             </form>
             <?php if (!empty($_GET['printcom_test_result'])): ?>
                 <div class="notice notice-info" style="margin-top:10px;"><p><?php echo wp_kses_post(wp_unslash($_GET['printcom_test_result'])); ?></p></div>
@@ -181,11 +176,16 @@ class Printcom_Order_Tracker {
                 <?php wp_nonce_field('printcom_ot_test_order','printcom_ot_test_order_nonce'); ?>
                 <input type="hidden" name="action" value="printcom_ot_test_order"/>
                 <input type="text" name="order" placeholder="Ordernummer (bijv. 6001831441)" required/>
-                <button class="button">Test: haal order op</button>
+                <button class="button">Test: haal Print.com order op</button>
             </form>
             <?php if (!empty($_GET['printcom_test_order_result'])): ?>
                 <div class="notice notice-info" style="margin-top:10px;"><p><?php echo wp_kses_post(wp_unslash($_GET['printcom_test_order_result'])); ?></p></div>
             <?php endif; ?>
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="margin-top:10px;">
+                <?php wp_nonce_field('rmh_in_test_connection','rmh_in_test_connection_nonce'); ?>
+                <input type="hidden" name="action" value="rmh_in_test_connection"/>
+                <button class="button button-secondary">Invoice Ninja verbinding testen</button>
+            </form>
         </div>
         <?php
     }
@@ -556,9 +556,11 @@ class Printcom_Order_Tracker {
             if ($client instanceof RMH_InvoiceNinja_Client) {
                 $invoice_id = $this->resolve_invoice_ninja_invoice_id($map, $data, $own, $orderNum);
                 if ($invoice_id) {
-                    $portal_link = $client->get_invoice_portal_link($invoice_id);
-                    if ($portal_link) {
-                        $invoice_cta_html = '<div class="rmh-invoice-cta"><a class="rmh-btn rmh-btn-pay" target="_blank" rel="noopener" href="' . esc_url($portal_link) . '">Factuur bekijken / betalen</a></div>';
+                    $details = $client->get_invoice_portal_details($invoice_id);
+                    if (is_array($details) && !empty($details['link'])) {
+                        $is_paid = $details['is_paid'] ?? null;
+                        $button_text = ($is_paid === true) ? 'Bekijk factuur' : 'Bekijk en betaal factuur';
+                        $invoice_cta_html = '<div class="rmh-invoice-cta"><a class="rmh-btn rmh-btn-pay" target="_blank" rel="noopener" href="' . esc_url($details['link']) . '">' . esc_html($button_text) . '</a></div>';
                     }
                 }
             }
@@ -1532,7 +1534,7 @@ class Printcom_Order_Tracker {
         global $post;
         $content = $post->post_content ?? '';
         if (has_shortcode($content, 'print_order_status')) {
-            wp_enqueue_style('rmh-ot-style', plugins_url('assets/css/order-tracker.css', __FILE__), [], '2.3.1');
+            wp_enqueue_style('rmh-ot-style', plugins_url('assets/css/order-tracker.css', __FILE__), [], '2.3.2');
         }
         if (has_shortcode($content, 'print_order_lookup')) {
             wp_enqueue_style('rmh-order-lookup', plugins_url('assets/css/order-lookup.css', __FILE__), [], '2.1.4');
