@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     2.3.3
+ * Version:     2.3.4
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -186,6 +186,15 @@ class Printcom_Order_Tracker {
                 <input type="hidden" name="action" value="rmh_in_test_connection"/>
                 <button class="button button-secondary">Invoice Ninja verbinding testen</button>
             </form>
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="margin-top:10px;">
+                <?php wp_nonce_field('rmh_in_test_invoice_lookup','rmh_in_test_invoice_lookup_nonce'); ?>
+                <input type="hidden" name="action" value="rmh_in_test_invoice_lookup"/>
+                <input type="text" name="invoice" placeholder="Factuurnummer" required/>
+                <button class="button">Test: zoek Invoice Ninja factuur</button>
+            </form>
+            <?php if (!empty($_GET['rmh_in_test_invoice_result'])): ?>
+                <div class="notice notice-info" style="margin-top:10px;"><p><?php echo wp_kses_post(wp_unslash($_GET['rmh_in_test_invoice_result'])); ?></p></div>
+            <?php endif; ?>
         </div>
         <?php
     }
@@ -1561,7 +1570,7 @@ class Printcom_Order_Tracker {
         global $post;
         $content = $post->post_content ?? '';
         if (has_shortcode($content, 'print_order_status')) {
-            wp_enqueue_style('rmh-ot-style', plugins_url('assets/css/order-tracker.css', __FILE__), [], '2.3.3');
+            wp_enqueue_style('rmh-ot-style', plugins_url('assets/css/order-tracker.css', __FILE__), [], '2.3.4');
         }
         if (has_shortcode($content, 'print_order_lookup')) {
             wp_enqueue_style('rmh-order-lookup', plugins_url('assets/css/order-lookup.css', __FILE__), [], '2.1.4');
@@ -1818,6 +1827,54 @@ add_action('admin_post_rmh_in_test_connection', function(){
     $redirect = wp_get_referer() ?: admin_url('options-general.php?page=printcom-orders-settings');
     $redirect = remove_query_arg('rmh_in_test_status', $redirect);
     $redirect = add_query_arg('rmh_in_test_status', $status, $redirect);
+    wp_safe_redirect($redirect);
+    exit;
+});
+
+// Invoice Ninja factuur zoeken
+add_action('admin_post_rmh_in_test_invoice_lookup', function(){
+    if(!current_user_can('manage_options')) wp_die('Unauthorized');
+    if(empty($_POST['rmh_in_test_invoice_lookup_nonce']) || !wp_verify_nonce($_POST['rmh_in_test_invoice_lookup_nonce'],'rmh_in_test_invoice_lookup')) wp_die('Nonce invalid');
+
+    $invoice = isset($_POST['invoice']) ? sanitize_text_field(wp_unslash($_POST['invoice'])) : '';
+    $invoice = trim($invoice);
+    $msg     = '';
+
+    if($invoice === ''){
+        $msg = '❌ Vul een factuurnummer in.';
+    } else {
+        $client = function_exists('rmh_get_invoice_ninja_client_singleton') ? rmh_get_invoice_ninja_client_singleton() : null;
+
+        if(!$client){
+            $msg = '❌ Invoice Ninja client niet beschikbaar. Controleer of de integratie is ingeschakeld en of de URL/token correct zijn.';
+        } else {
+            $details = $client->get_invoice_portal_details($invoice);
+
+            if(is_array($details) && !empty($details['link'])){
+                $status = 'Onbekend';
+                if(array_key_exists('is_paid', $details)){
+                    if($details['is_paid'] === true){
+                        $status = 'Betaald';
+                    } elseif($details['is_paid'] === false){
+                        $status = 'Niet betaald';
+                    }
+                }
+
+                $msg = sprintf(
+                    '✅ Factuur <strong>%1$s</strong> gevonden. Portal-link: <a href="%2$s" target="_blank" rel="noopener">%2$s</a>. Betaalstatus: %3$s.',
+                    esc_html($invoice),
+                    esc_url($details['link']),
+                    esc_html($status)
+                );
+            } else {
+                $msg = sprintf('❌ Geen portal-link gevonden voor factuur <strong>%s</strong>.', esc_html($invoice));
+            }
+        }
+    }
+
+    $redirect = wp_get_referer() ?: admin_url('options-general.php?page=printcom-orders-settings');
+    $redirect = remove_query_arg('rmh_in_test_invoice_result', $redirect);
+    $redirect = add_query_arg('rmh_in_test_invoice_result', rawurlencode($msg), $redirect);
     wp_safe_redirect($redirect);
     exit;
 });
