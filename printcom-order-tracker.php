@@ -2,13 +2,15 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     2.2.1
+ * Version:     2.3.0
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
  */
 
 if (!defined('ABSPATH')) exit;
+
+require_once plugin_dir_path(__FILE__) . 'includes/class-rmh-invoice-ninja-client.php';
 
 class Printcom_Order_Tracker {
     const OPT_SETTINGS     = 'printcom_ot_settings';
@@ -70,23 +72,31 @@ class Printcom_Order_Tracker {
     public function register_settings() {
         register_setting(self::OPT_SETTINGS, self::OPT_SETTINGS, [$this,'sanitize_settings']);
         add_settings_section('printcom_ot_section','API-instellingen','__return_false',self::OPT_SETTINGS);
+        add_settings_section('printcom_ot_invoice_ninja','Invoice Ninja','__return_false',self::OPT_SETTINGS);
         $s = $this->get_settings();
-        $add=function($k,$label,$html,$desc=''){
-            add_settings_field($k,$label,function() use($html,$desc){ echo $html; if($desc) echo '<p class="description">'.$desc.'</p>'; },self::OPT_SETTINGS,'printcom_ot_section');
+        $add=function($section,$k,$label,$html,$desc=''){
+            add_settings_field($k,$label,function() use($html,$desc){ echo $html; if($desc) echo '<p class="description">'.$desc.'</p>'; },self::OPT_SETTINGS,$section);
         };
-        $add('api_base_url','API Base URL',sprintf('<input type="url" name="%s[api_base_url]" value="%s" class="regular-text" placeholder="https://api.print.com"/>',esc_attr(self::OPT_SETTINGS),esc_attr($s['api_base_url']??'https://api.print.com')));
-        $add('auth_url','Auth URL (login)',sprintf('<input type="url" name="%s[auth_url]" value="%s" class="regular-text" placeholder="https://api.print.com/login"/>',esc_attr(self::OPT_SETTINGS),esc_attr($s['auth_url']??'https://api.print.com/login')),'Voor Print.com: <code>https://api.print.com/login</code>.');
+        $add('printcom_ot_section','api_base_url','API Base URL',sprintf('<input type="url" name="%s[api_base_url]" value="%s" class="regular-text" placeholder="https://api.print.com"/>',esc_attr(self::OPT_SETTINGS),esc_attr($s['api_base_url']??'https://api.print.com')));
+        $add('printcom_ot_section','auth_url','Auth URL (login)',sprintf('<input type="url" name="%s[auth_url]" value="%s" class="regular-text" placeholder="https://api.print.com/login"/>',esc_attr(self::OPT_SETTINGS),esc_attr($s['auth_url']??'https://api.print.com/login')),'Voor Print.com: <code>https://api.print.com/login</code>.');
         ob_start(); ?>
             <select name="<?php echo esc_attr(self::OPT_SETTINGS); ?>[grant_type]">
                 <option value="password" <?php selected($s['grant_type']??'password','password'); ?>>password (/login)</option>
                 <option value="client_credentials" <?php selected($s['grant_type']??'password','client_credentials'); ?>>client_credentials (fallback)</option>
             </select>
-        <?php $add('grant_type','Grant type',ob_get_clean());
-        $add('client_id','Client ID (optioneel)',sprintf('<input type="text" name="%s[client_id]" value="%s" class="regular-text"/>',esc_attr(self::OPT_SETTINGS),esc_attr($s['client_id']??'')));
-        $add('client_secret','Client Secret (optioneel)',sprintf('<input type="password" name="%s[client_secret]" value="%s" class="regular-text"/>',esc_attr(self::OPT_SETTINGS),esc_attr($s['client_secret']??'')));
-        $add('username','Username',sprintf('<input type="text" name="%s[username]" value="%s" class="regular-text"/>',esc_attr(self::OPT_SETTINGS),esc_attr($s['username']??'')));
-        $add('password','Password',sprintf('<input type="password" name="%s[password]" value="%s" class="regular-text"/>',esc_attr(self::OPT_SETTINGS),esc_attr($s['password']??'')));
-        $add('default_cache_ttl','Cache (minuten)',sprintf('<input type="number" min="0" step="1" name="%s[default_cache_ttl]" value="%d" class="small-text"/>',esc_attr(self::OPT_SETTINGS),isset($s['default_cache_ttl'])?(int)$s['default_cache_ttl']:5),'HOT=5m, COLD=24u.');
+        <?php $add('printcom_ot_section','grant_type','Grant type',ob_get_clean());
+        $add('printcom_ot_section','client_id','Client ID (optioneel)',sprintf('<input type="text" name="%s[client_id]" value="%s" class="regular-text"/>',esc_attr(self::OPT_SETTINGS),esc_attr($s['client_id']??'')));
+        $add('printcom_ot_section','client_secret','Client Secret (optioneel)',sprintf('<input type="password" name="%s[client_secret]" value="%s" class="regular-text"/>',esc_attr(self::OPT_SETTINGS),esc_attr($s['client_secret']??'')));
+        $add('printcom_ot_section','username','Username',sprintf('<input type="text" name="%s[username]" value="%s" class="regular-text"/>',esc_attr(self::OPT_SETTINGS),esc_attr($s['username']??'')));
+        $add('printcom_ot_section','password','Password',sprintf('<input type="password" name="%s[password]" value="%s" class="regular-text"/>',esc_attr(self::OPT_SETTINGS),esc_attr($s['password']??'')));
+        $add('printcom_ot_section','default_cache_ttl','Cache (minuten)',sprintf('<input type="number" min="0" step="1" name="%s[default_cache_ttl]" value="%d" class="small-text"/>',esc_attr(self::OPT_SETTINGS),isset($s['default_cache_ttl'])?(int)$s['default_cache_ttl']:5),'HOT=5m, COLD=24u.');
+
+        $enabled_checked = checked(!empty($s['rmh_integration_enabled']), true, false);
+        $add('printcom_ot_invoice_ninja','rmh_integration_enabled','Integratie inschakelen',sprintf('<label><input type="checkbox" name="%1$s[rmh_integration_enabled]" value="1" %2$s/> Schakel Invoice Ninja integratie in</label>',esc_attr(self::OPT_SETTINGS),$enabled_checked),'Toon de betaallink op de track-&-trace pagina.');
+        $add('printcom_ot_invoice_ninja','rmh_in_base_url','Invoice Ninja Base URL',sprintf('<input type="url" name="%1$s[rmh_in_base_url]" value="%2$s" class="regular-text" placeholder="https://invoicing.co"/>',esc_attr(self::OPT_SETTINGS),esc_attr($s['rmh_in_base_url']??'')),'Bijvoorbeeld: <code>https://invoicing.co</code>.');
+        $add('printcom_ot_invoice_ninja','rmh_in_api_token','API Token',sprintf('<input type="password" name="%1$s[rmh_in_api_token]" value="%2$s" class="regular-text" autocomplete="new-password"/>',esc_attr(self::OPT_SETTINGS),esc_attr($s['rmh_in_api_token']??'')),'Gebruik een Invoice Ninja v5 API token.');
+        $cache_minutes = isset($s['rmh_in_cache_minutes']) ? (int) $s['rmh_in_cache_minutes'] : 10;
+        $add('printcom_ot_invoice_ninja','rmh_in_cache_minutes','Cache (minuten)',sprintf('<input type="number" min="0" step="1" name="%1$s[rmh_in_cache_minutes]" value="%2$d" class="small-text"/>',esc_attr(self::OPT_SETTINGS),$cache_minutes),'Bewaar uitnodigingslinks tijdelijk (0 = geen cache).');
     }
 
     public function sanitize_settings($in){
@@ -99,7 +109,36 @@ class Printcom_Order_Tracker {
         $o['username']=trim(sanitize_text_field($in['username']??''));
         $o['password']=trim((string)($in['password']??''));
         $o['default_cache_ttl']=max(0,(int)($in['default_cache_ttl']??5));
+        $o['rmh_integration_enabled']=!empty($in['rmh_integration_enabled'])?1:0;
+        $o['rmh_in_base_url']=$this->normalize_invoice_ninja_base_url($in['rmh_in_base_url']??'');
+        $o['rmh_in_api_token']=trim(sanitize_text_field($in['rmh_in_api_token']??''));
+        $o['rmh_in_cache_minutes']=max(0,(int)($in['rmh_in_cache_minutes']??10));
         return $o;
+    }
+
+    private function normalize_invoice_ninja_base_url($url): string {
+        if (!is_string($url)) {
+            return '';
+        }
+
+        $normalized = trim($url);
+        if ($normalized === '') {
+            return '';
+        }
+
+        if (stripos($normalized, 'http://') === 0) {
+            $normalized = 'https://' . substr($normalized, 7);
+        }
+        if (stripos($normalized, 'https://') !== 0) {
+            return '';
+        }
+
+        $normalized = esc_url_raw($normalized);
+        if (!is_string($normalized) || $normalized === '') {
+            return '';
+        }
+
+        return untrailingslashit($normalized);
     }
 
     public function settings_page() {
@@ -491,6 +530,20 @@ class Printcom_Order_Tracker {
         }
         $ship_addr = $this->extract_primary_shipping_address($data);
         $nl_status = $this->human_status($data); // geeft NL: "Deels verzonden", "Verzonden", etc.
+
+        $invoice_cta_html = '';
+        if (is_user_logged_in()) {
+            $invoice_id = $this->resolve_invoice_ninja_invoice_id($map, $data, $own, $orderNum);
+            if ($invoice_id && function_exists('rmh_get_invoice_ninja_client_singleton')) {
+                $client = rmh_get_invoice_ninja_client_singleton();
+                if ($client instanceof RMH_InvoiceNinja_Client) {
+                    $portal_link = $client->get_invoice_portal_link($invoice_id);
+                    if ($portal_link) {
+                        $invoice_cta_html = '<div class="rmh-invoice-cta"><a class="rmh-btn rmh-btn-pay" target="_blank" rel="noopener" href="' . esc_url($portal_link) . '">Factuur bekijken / betalen</a></div>';
+                    }
+                }
+            }
+        }
     
 
         // prioriteit voor warming
@@ -531,6 +584,9 @@ class Printcom_Order_Tracker {
         $overall_status = $this->determine_overall_order_status($data);
 
         $html  = '<div class="rmh-ot">';
+        if ($invoice_cta_html) {
+            $html .= $invoice_cta_html;
+        }
         // GEEN header-row meer
 
         $summary_html = sprintf(
@@ -696,6 +752,70 @@ class Printcom_Order_Tracker {
 
         return $html;
         }
+
+    private function resolve_invoice_ninja_invoice_id($map_entry, array $order_data, string $own_order, string $print_order): ?string {
+        if (!is_array($map_entry)) {
+            $map_entry = [];
+        }
+
+        $candidates = [];
+
+        if (!empty($map_entry['invoice_id'])) {
+            $candidates[] = $map_entry['invoice_id'];
+        }
+
+        foreach (['invoiceId','invoice_id','invoiceUuid','invoice_uuid','invoiceNumber','invoice_number'] as $field) {
+            if (!empty($order_data[$field])) {
+                $candidates[] = $order_data[$field];
+            }
+        }
+
+        if (!empty($order_data['invoiceIds']) && is_array($order_data['invoiceIds'])) {
+            foreach ($order_data['invoiceIds'] as $value) {
+                if (is_scalar($value) && trim((string) $value) !== '') {
+                    $candidates[] = $value;
+                    break;
+                }
+            }
+        }
+
+        if (!empty($order_data['financial']) && is_array($order_data['financial'])) {
+            foreach (['invoiceId','invoice_id','invoiceUuid','invoice_uuid'] as $field) {
+                if (!empty($order_data['financial'][$field])) {
+                    $candidates[] = $order_data['financial'][$field];
+                }
+            }
+        }
+
+        $invoice_id = '';
+        foreach ($candidates as $candidate) {
+            if (is_scalar($candidate)) {
+                $candidate = trim((string) $candidate);
+                if ($candidate !== '') {
+                    $invoice_id = $candidate;
+                    break;
+                }
+            }
+        }
+
+        /**
+         * Bepaal het Invoice Ninja ID voor deze order.
+         *
+         * @param string $invoice_id  Huidige gevonden invoice ID (kan leeg zijn).
+         * @param array  $order_data  Orderdata van de Print.com API.
+         * @param array  $map_entry   Mapping info voor deze order.
+         * @param string $own_order   Eigen ordernummer.
+         * @param string $print_order Print.com ordernummer.
+         */
+        $invoice_id = apply_filters('rmh_invoice_ninja_invoice_id', $invoice_id, $order_data, $map_entry, $own_order, $print_order);
+        if (!is_string($invoice_id)) {
+            $invoice_id = '';
+        }
+
+        $invoice_id = trim($invoice_id);
+
+        return $invoice_id !== '' ? $invoice_id : null;
+    }
 
     private function pretty_product_title(array $item): string {
         $qty  = isset($item['quantity']) ? (int)$item['quantity'] : 1;
@@ -1393,7 +1513,7 @@ class Printcom_Order_Tracker {
         global $post;
         $content = $post->post_content ?? '';
         if (has_shortcode($content, 'print_order_status')) {
-            wp_enqueue_style('rmh-ot-style', plugins_url('assets/css/order-tracker.css', __FILE__), [], '1.1.0');
+            wp_enqueue_style('rmh-ot-style', plugins_url('assets/css/order-tracker.css', __FILE__), [], '2.3.0');
         }
         if (has_shortcode($content, 'print_order_lookup')) {
             wp_enqueue_style('rmh-order-lookup', plugins_url('assets/css/order-lookup.css', __FILE__), [], '2.1.4');
@@ -1571,6 +1691,45 @@ class Printcom_Order_Tracker {
         $ph=0; foreach($hot as $o){ if($ph>=$hot_limit)break; $d=$this->api_get_order($o['order']); if(!is_wp_error($d)) set_transient(self::TRANSIENT_PREFIX.md5($o['order']),$d,$this->dynamic_cache_ttl_for($d)); $ph++; }
         $pc=0; foreach($cold as $o){ if($pc>=$cold_limit)break; $d=$this->api_get_order($o['order']); if(!is_wp_error($d)) set_transient(self::TRANSIENT_PREFIX.md5($o['order']),$d,$this->dynamic_cache_ttl_for($d)); $pc++; }
     }
+}
+
+/**
+ * Verkrijg een gedeelde Invoice Ninja client op basis van de huidige instellingen.
+ *
+ * @return RMH_InvoiceNinja_Client|null
+ */
+function rmh_get_invoice_ninja_client_singleton() {
+    static $instance = null;
+    static $state_hash = null;
+
+    $settings = get_option(Printcom_Order_Tracker::OPT_SETTINGS, []);
+    $enabled  = !empty($settings['rmh_integration_enabled']);
+    $base_raw = isset($settings['rmh_in_base_url']) ? (string) $settings['rmh_in_base_url'] : '';
+    $base     = '';
+    if ($base_raw !== '') {
+        $candidate = esc_url_raw(trim($base_raw));
+        if (is_string($candidate) && $candidate !== '' && stripos($candidate, 'https://') === 0) {
+            $base = untrailingslashit($candidate);
+        }
+    }
+    $token    = isset($settings['rmh_in_api_token']) ? (string) $settings['rmh_in_api_token'] : '';
+    $cache    = isset($settings['rmh_in_cache_minutes']) ? absint($settings['rmh_in_cache_minutes']) : 10;
+
+    $hash = md5(wp_json_encode([$enabled, $base, $token, $cache]));
+    if ($state_hash === $hash) {
+        return $instance;
+    }
+
+    $state_hash = $hash;
+
+    if (!$enabled || $base === '' || trim($token) === '') {
+        $instance = null;
+        return null;
+    }
+
+    $instance = new RMH_InvoiceNinja_Client($base, trim($token), $cache);
+
+    return $instance;
 }
 
 /* ===== Hooks ===== */

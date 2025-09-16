@@ -15,6 +15,7 @@ Tokens worden automatisch vernieuwd. Ontworpen om goed samen te werken met **Div
 ## Features
 - Automatisch pagina’s aanmaken/bijwerken per ordernummer
 - Orderstatus, producten en Track & Trace links tonen
+- Optionele betaallink-knop via Invoice Ninja uitnodigingen
 - Zoekformulier op ordernummer + postcode via shortcode [print_order_lookup]
 - Cache instelbaar (default 30 minuten)
 - Ondersteuning voor eigen afbeelding per orderpagina
