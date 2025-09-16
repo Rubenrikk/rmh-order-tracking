@@ -80,4 +80,6 @@
 @media(max-width:900px){.rmh-invoice-cta{text-align:center}}
 .rmh-btn.rmh-btn-pay{display:inline-block;padding:.6rem 1rem;border-radius:.375rem;text-decoration:none;background-color:var(--rmh-btn-pay-bg,#0B63C4);color:#fff;border:1px solid var(--rmh-btn-pay-border,#0B63C4);font-weight:600;transition:background-color .2s ease,border-color .2s ease,color .2s ease}
 .rmh-btn.rmh-btn-pay:hover,.rmh-btn.rmh-btn-pay:focus{background-color:var(--rmh-btn-pay-bg-hover,#094f9c);border-color:var(--rmh-btn-pay-border-hover,#094f9c);color:#fff}
+.rmh-invoice-admin-hint{margin:1rem 0;text-align:right;font-size:.875rem;color:#6c757d}
+@media(max-width:900px){.rmh-invoice-admin-hint{text-align:center}}
 
