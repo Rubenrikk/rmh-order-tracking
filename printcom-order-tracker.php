@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     2.3.0
+ * Version:     2.3.1
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -72,7 +72,7 @@ class Printcom_Order_Tracker {
     public function register_settings() {
         register_setting(self::OPT_SETTINGS, self::OPT_SETTINGS, [$this,'sanitize_settings']);
         add_settings_section('printcom_ot_section','API-instellingen','__return_false',self::OPT_SETTINGS);
-        add_settings_section('printcom_ot_invoice_ninja','Invoice Ninja','__return_false',self::OPT_SETTINGS);
+        add_settings_section('printcom_ot_invoice_ninja','Invoice Ninja',[$this,'render_invoice_ninja_section_description'],self::OPT_SETTINGS);
         $s = $this->get_settings();
         $add=function($section,$k,$label,$html,$desc=''){
             add_settings_field($k,$label,function() use($html,$desc){ echo $html; if($desc) echo '<p class="description">'.$desc.'</p>'; },self::OPT_SETTINGS,$section);
@@ -97,6 +97,10 @@ class Printcom_Order_Tracker {
         $add('printcom_ot_invoice_ninja','rmh_in_api_token','API Token',sprintf('<input type="password" name="%1$s[rmh_in_api_token]" value="%2$s" class="regular-text" autocomplete="new-password"/>',esc_attr(self::OPT_SETTINGS),esc_attr($s['rmh_in_api_token']??'')),'Gebruik een Invoice Ninja v5 API token.');
         $cache_minutes = isset($s['rmh_in_cache_minutes']) ? (int) $s['rmh_in_cache_minutes'] : 10;
         $add('printcom_ot_invoice_ninja','rmh_in_cache_minutes','Cache (minuten)',sprintf('<input type="number" min="0" step="1" name="%1$s[rmh_in_cache_minutes]" value="%2$d" class="small-text"/>',esc_attr(self::OPT_SETTINGS),$cache_minutes),'Bewaar uitnodigingslinks tijdelijk (0 = geen cache).');
+    }
+
+    public function render_invoice_ninja_section_description() {
+        echo '<p>De factuurknop verschijnt automatisch op de track &amp; trace pagina zodra de integratie actief is en er een factuur-ID aan de order is gekoppeld. Dit factuur-ID komt overeen met de pagina-naam of het order-ID dat door het systeem wordt gebruikt.</p>';
     }
 
     public function sanitize_settings($in){
@@ -146,8 +150,23 @@ class Printcom_Order_Tracker {
         ?>
         <div class="wrap">
             <h1>Print.com Orders — Instellingen</h1>
+            <?php
+            if (!empty($_GET['rmh_in_test_status'])) {
+                $status = sanitize_key(wp_unslash($_GET['rmh_in_test_status']));
+                if ($status === 'success') {
+                    echo '<div class="notice notice-success" style="margin-top:10px;"><p>✅ Verbinding met Invoice Ninja succesvol.</p></div>';
+                } elseif ($status === 'error') {
+                    echo '<div class="notice notice-error" style="margin-top:10px;"><p>❌ Verbinding mislukt. Controleer je URL en API token.</p></div>';
+                }
+            }
+            ?>
             <form method="post" action="options.php">
                 <?php settings_fields(self::OPT_SETTINGS); do_settings_sections(self::OPT_SETTINGS); submit_button(); ?>
+            </form>
+            <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="margin-top:10px;">
+                <?php wp_nonce_field('rmh_in_test_connection','rmh_in_test_connection_nonce'); ?>
+                <input type="hidden" name="action" value="rmh_in_test_connection"/>
+                <button class="button button-secondary">Test verbinding</button>
             </form>
             <hr/>
             <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="margin-top:10px;">
@@ -532,11 +551,11 @@ class Printcom_Order_Tracker {
         $nl_status = $this->human_status($data); // geeft NL: "Deels verzonden", "Verzonden", etc.
 
         $invoice_cta_html = '';
-        if (is_user_logged_in()) {
-            $invoice_id = $this->resolve_invoice_ninja_invoice_id($map, $data, $own, $orderNum);
-            if ($invoice_id && function_exists('rmh_get_invoice_ninja_client_singleton')) {
-                $client = rmh_get_invoice_ninja_client_singleton();
-                if ($client instanceof RMH_InvoiceNinja_Client) {
+        if (function_exists('rmh_get_invoice_ninja_client_singleton')) {
+            $client = rmh_get_invoice_ninja_client_singleton();
+            if ($client instanceof RMH_InvoiceNinja_Client) {
+                $invoice_id = $this->resolve_invoice_ninja_invoice_id($map, $data, $own, $orderNum);
+                if ($invoice_id) {
                     $portal_link = $client->get_invoice_portal_link($invoice_id);
                     if ($portal_link) {
                         $invoice_cta_html = '<div class="rmh-invoice-cta"><a class="rmh-btn rmh-btn-pay" target="_blank" rel="noopener" href="' . esc_url($portal_link) . '">Factuur bekijken / betalen</a></div>';
@@ -1513,7 +1532,7 @@ class Printcom_Order_Tracker {
         global $post;
         $content = $post->post_content ?? '';
         if (has_shortcode($content, 'print_order_status')) {
-            wp_enqueue_style('rmh-ot-style', plugins_url('assets/css/order-tracker.css', __FILE__), [], '2.3.0');
+            wp_enqueue_style('rmh-ot-style', plugins_url('assets/css/order-tracker.css', __FILE__), [], '2.3.1');
         }
         if (has_shortcode($content, 'print_order_lookup')) {
             wp_enqueue_style('rmh-order-lookup', plugins_url('assets/css/order-lookup.css', __FILE__), [], '2.1.4');
@@ -1737,6 +1756,42 @@ register_activation_hook(__FILE__, ['Printcom_Order_Tracker','activate']);
 register_deactivation_hook(__FILE__, ['Printcom_Order_Tracker','deactivate']);
 
 /* ===== Admin-post: debug & acties ===== */
+
+// Invoice Ninja verbinding testen
+add_action('admin_post_rmh_in_test_connection', function(){
+    if(!current_user_can('manage_options')) wp_die('Unauthorized');
+    if(empty($_POST['rmh_in_test_connection_nonce']) || !wp_verify_nonce($_POST['rmh_in_test_connection_nonce'],'rmh_in_test_connection')) wp_die('Nonce invalid');
+
+    $settings = get_option(Printcom_Order_Tracker::OPT_SETTINGS, []);
+    $base     = isset($settings['rmh_in_base_url']) ? trim((string) $settings['rmh_in_base_url']) : '';
+    $token    = isset($settings['rmh_in_api_token']) ? trim((string) $settings['rmh_in_api_token']) : '';
+    $status   = 'error';
+
+    if($base !== '' && $token !== '' && stripos($base, 'https://') === 0){
+        $endpoint = untrailingslashit($base) . '/api/v1/ping';
+        $response = wp_remote_get($endpoint,[
+            'timeout' => 10,
+            'headers' => [
+                'X-API-Token'      => $token,
+                'X-Requested-With' => 'XMLHttpRequest',
+                'Accept'           => 'application/json',
+                'User-Agent'       => 'RMH-Order-Tracker (+WordPress)'
+            ],
+        ]);
+        if(!is_wp_error($response)){
+            $code = (int) wp_remote_retrieve_response_code($response);
+            if($code >= 200 && $code < 300){
+                $status = 'success';
+            }
+        }
+    }
+
+    $redirect = wp_get_referer() ?: admin_url('options-general.php?page=printcom-orders-settings');
+    $redirect = remove_query_arg('rmh_in_test_status', $redirect);
+    $redirect = add_query_arg('rmh_in_test_status', $status, $redirect);
+    wp_safe_redirect($redirect);
+    exit;
+});
 
 // /login test
 add_action('admin_post_printcom_ot_test_connection', function(){
