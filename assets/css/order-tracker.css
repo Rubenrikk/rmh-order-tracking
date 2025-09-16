@@ -1,7 +1,7 @@
 /* ===== Basis / layout ===== */
 .rmh-ot{border:0;padding:0}
 .rmh-ot--error{border:1px solid #f5c2c7;background:#f8d7da;padding:12px;border-radius:8px;color:#842029}
-.rmh-ot__summary{margin:12px auto 24px;text-align:center;font-size:1.125rem;font-weight:500;color:#4a4a4a;line-height:1.5;max-width:960px}
+.rmh-ot__summary{margin:12px auto 24px;text-align:left;font-size:1.125rem;font-weight:500;color:#232323;line-height:1.5;max-width:960px}
 .rmh-ot__summary-count,.rmh-ot__summary-status{font-weight:600}
 .rmh-ot__postcode-form{margin-top:8px}
 .rmh-ot__postcode-form input{margin-right:6px;padding:4px}
