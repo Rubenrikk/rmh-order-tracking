@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     2.4.1
+ * Version:     2.4.2
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -905,7 +905,9 @@ class Printcom_Order_Tracker {
             $meta_html .= '</div>';
         }
 
-        $html  = '<section class="rmh-invoice-card" aria-label="Factuurinformatie">';
+        $html  = '<div class="rmh-ot__items rmh-ot__items--invoice">';
+        $html .=   '<h3>Overzicht van je factuur</h3>';
+        $html .=   '<section class="rmh-invoice-card" aria-label="Factuurinformatie">';
         $html .=   '<div class="rmh-invoice-card__header">';
         $html .=     '<h3 class="rmh-invoice-card__title">' . esc_html($title) . '</h3>';
         $html .=     '<span class="rmh-invoice-card__badge ' . esc_attr($badge_class) . '">' . esc_html($badge_text) . '</span>';
@@ -914,7 +916,8 @@ class Printcom_Order_Tracker {
         if ($cta_button_html !== '') {
             $html .=   '<div class="rmh-invoice-card__footer">' . $cta_button_html . '</div>';
         }
-        $html .= '</section>';
+        $html .=   '</section>';
+        $html .= '</div>';
 
         return $html;
     }
@@ -1846,7 +1849,7 @@ class Printcom_Order_Tracker {
         global $post;
         $content = $post->post_content ?? '';
         if (has_shortcode($content, 'print_order_status')) {
-            wp_enqueue_style('rmh-ot-style', plugins_url('assets/css/order-tracker.css', __FILE__), [], '2.4.1');
+            wp_enqueue_style('rmh-ot-style', plugins_url('assets/css/order-tracker.css', __FILE__), [], '2.4.2');
         }
         if (has_shortcode($content, 'print_order_lookup')) {
             wp_enqueue_style('rmh-order-lookup', plugins_url('assets/css/order-lookup.css', __FILE__), [], '2.1.4');
