@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     2.4.2
+ * Version:     2.4.3
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -852,15 +852,30 @@ class Printcom_Order_Tracker {
 
         $currency = isset($details['currency']) && is_string($details['currency']) ? $details['currency'] : null;
         $date_display = $this->format_invoice_date_display($details['invoice_date'] ?? null);
+        $due_date_display = $this->format_invoice_date_display($details['due_date'] ?? null);
         $total_display = $this->format_invoice_amount($details['total'] ?? null, $currency);
         $subtotal_display = $this->format_invoice_amount($details['subtotal'] ?? null, $currency);
-        $tax_display = $this->format_invoice_amount($details['tax'] ?? null, $currency);
+        $tax_value = isset($details['tax']) && is_numeric($details['tax']) ? (float) $details['tax'] : null;
+        $total_value = isset($details['total']) && is_numeric($details['total']) ? (float) $details['total'] : null;
         $balance_value = $details['balance'] ?? null;
         $balance_display = $this->format_invoice_amount($balance_value, $currency);
 
         $meta_rows = [];
         if ($date_display) {
-            $meta_rows[] = ['label' => 'Datum', 'value' => $date_display];
+            $meta_rows[] = ['label' => 'Factuurdatum', 'value' => $date_display];
+        }
+        if ($due_date_display) {
+            $meta_rows[] = ['label' => 'Vervaldatum', 'value' => $due_date_display];
+        }
+        $excl_total_display = $subtotal_display;
+        if ($excl_total_display === null && $total_value !== null && $tax_value !== null) {
+            $excl_total_display = $this->format_invoice_amount($total_value - $tax_value, $currency);
+        }
+        if ($excl_total_display === null && $total_display !== null) {
+            $excl_total_display = $total_display;
+        }
+        if ($excl_total_display !== null) {
+            $meta_rows[] = ['label' => 'Totaal (excl. btw)', 'value' => $excl_total_display];
         }
         if ($total_display) {
             $meta_rows[] = ['label' => 'Totaal (incl. btw)', 'value' => $total_display];
@@ -875,20 +890,6 @@ class Printcom_Order_Tracker {
             }
         }
         $meta_html = '';
-        if ($tax_display) {
-            $meta_rows[] = [
-                'label' => 'btw',
-                'value' => $tax_display,
-                'modifier' => 'subtle',
-            ];
-        }
-        if ($subtotal_display) {
-            $meta_rows[] = [
-                'label' => 'Subtotaal',
-                'value' => $subtotal_display,
-                'modifier' => 'subtle',
-            ];
-        }
         if ($show_balance && $balance_display) {
             $meta_rows[] = ['label' => 'Openstaand', 'value' => $balance_display];
         }
@@ -1849,7 +1850,7 @@ class Printcom_Order_Tracker {
         global $post;
         $content = $post->post_content ?? '';
         if (has_shortcode($content, 'print_order_status')) {
-            wp_enqueue_style('rmh-ot-style', plugins_url('assets/css/order-tracker.css', __FILE__), [], '2.4.2');
+            wp_enqueue_style('rmh-ot-style', plugins_url('assets/css/order-tracker.css', __FILE__), [], '2.4.3');
         }
         if (has_shortcode($content, 'print_order_lookup')) {
             wp_enqueue_style('rmh-order-lookup', plugins_url('assets/css/order-lookup.css', __FILE__), [], '2.1.4');

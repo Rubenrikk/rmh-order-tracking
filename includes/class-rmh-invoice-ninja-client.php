@@ -62,6 +62,7 @@ class RMH_InvoiceNinja_Client {
      *     is_paid:bool|null,
      *     invoice_number:?string,
      *     invoice_date:?string,
+     *     due_date:?string,
      *     total:?float,
      *     balance:?float,
      *     subtotal:?float,
@@ -448,6 +449,7 @@ class RMH_InvoiceNinja_Client {
             'is_paid'        => $this->determine_invoice_paid_status( $payload ),
             'invoice_number' => $this->extract_string_value( $invoice, [ 'invoice_number', 'number', 'id_number', 'po_number' ] ),
             'invoice_date'   => $this->extract_string_value( $invoice, [ 'date', 'invoice_date', 'invoicedate', 'created_at' ] ),
+            'due_date'       => $this->extract_string_value( $invoice, [ 'due_date', 'dueDate', 'due', 'due_on', 'due_at', 'expires_at', 'valid_until' ] ),
             'total'          => $this->extract_numeric_value( $invoice, [ 'amount', 'total', 'amount_raw' ] ),
             'balance'        => $this->extract_numeric_value( $invoice, [ 'balance', 'balance_raw', 'outstanding', 'amount_due', 'amountdue' ] ),
             'subtotal'       => $this->extract_numeric_value( $invoice, [ 'subtotal', 'sub_total', 'amount_less_tax', 'total_less_tax' ] ),
@@ -477,6 +479,7 @@ class RMH_InvoiceNinja_Client {
             'is_paid'        => null,
             'invoice_number' => null,
             'invoice_date'   => null,
+            'due_date'       => null,
             'total'          => null,
             'balance'        => null,
             'subtotal'       => null,
@@ -502,7 +505,7 @@ class RMH_InvoiceNinja_Client {
             }
         }
 
-        foreach ( [ 'invoice_number', 'invoice_date', 'currency' ] as $string_key ) {
+        foreach ( [ 'invoice_number', 'invoice_date', 'due_date', 'currency' ] as $string_key ) {
             if ( isset( $details[ $string_key ] ) && is_string( $details[ $string_key ] ) ) {
                 $value = trim( $details[ $string_key ] );
                 if ( $value !== '' ) {
