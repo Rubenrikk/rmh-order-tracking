@@ -82,22 +82,27 @@
 .rmh-invoice-card__badge{display:inline-flex;align-items:center;padding:4px 12px;border-radius:999px;font-size:.85rem;font-weight:600;color:#fff}
 .rmh-invoice-card__badge--paid{background:#198754}
 .rmh-invoice-card__badge--open{background:#E53935}
-.rmh-invoice-card__meta{margin-top:8px;display:flex;flex-wrap:wrap;gap:8px 18px;font-size:.95rem;color:#232323}
-.rmh-invoice-card__meta-item{display:flex;align-items:center;gap:6px}
+.rmh-invoice-card__meta{margin-top:12px;display:flex;flex-direction:column;gap:10px;font-size:.95rem;color:#232323}
+.rmh-invoice-card__meta-item{display:flex;align-items:flex-start;gap:6px;line-height:1.5}
 .rmh-invoice-card__meta-label{font-weight:600}
-.rmh-invoice-card__meta-small{margin-top:4px;font-size:.85rem;color:#6c757d}
-.rmh-invoice-card__summary{margin-top:14px;font-size:1.05rem;font-weight:500;color:#232323;line-height:1.5}
-.rmh-invoice-card__summary-count,.rmh-invoice-card__summary-status{font-weight:600}
+.rmh-invoice-card__meta-item--subtle{color:#6c757d;font-size:.9rem}
+.rmh-invoice-card__footer{margin-top:18px;display:flex;justify-content:flex-end}
+.rmh-invoice-card__footer .btn{display:inline-flex;align-items:center;justify-content:center}
+@media(max-width:767px){
+  .rmh-invoice-card__footer{margin-top:16px}
+  .rmh-invoice-card__footer .btn{width:100%;text-align:center}
+}
+.rmh-order-progress{margin:12px auto 18px;max-width:1100px;font-size:1.05rem;font-weight:500;color:#232323;line-height:1.5;text-align:left}
+.rmh-order-progress__count,.rmh-order-progress__status{font-weight:600}
+@media(max-width:900px){
+  .rmh-order-progress{margin:12px 12px 18px}
+}
 @media(max-width:900px){
   .rmh-invoice-card{margin:0 12px 16px;padding:16px}
   .rmh-invoice-card__header{align-items:flex-start}
 }
 
-/* Invoice Ninja CTA */
-.rmh-invoice-cta{margin:.75rem auto 1.5rem;text-align:right;max-width:1100px}
-@media(max-width:900px){.rmh-invoice-cta{text-align:center}}
-.rmh-btn.rmh-btn-pay{display:inline-block;padding:.6rem 1rem;border-radius:.375rem;text-decoration:none;background-color:var(--rmh-btn-pay-bg,#0B63C4);color:#fff;border:1px solid var(--rmh-btn-pay-border,#0B63C4);font-weight:600;transition:background-color .2s ease,border-color .2s ease,color .2s ease}
-.rmh-btn.rmh-btn-pay:hover,.rmh-btn.rmh-btn-pay:focus{background-color:var(--rmh-btn-pay-bg-hover,#094f9c);border-color:var(--rmh-btn-pay-border-hover,#094f9c);color:#fff}
+/* Invoice Ninja CTA button */
 .rmh-invoice-admin-hint{margin:1rem auto;text-align:right;font-size:.875rem;color:#6c757d;max-width:1100px}
 @media(max-width:900px){.rmh-invoice-admin-hint{text-align:center}}
 
