@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     2.4.3
+ * Version:     2.4.4
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -868,10 +868,10 @@ class Printcom_Order_Tracker {
 
         $meta_rows = [];
         if ($date_display) {
-            $meta_rows[] = ['label' => 'Factuurdatum', 'value' => $date_display];
+            $meta_rows[] = ['label' => 'Factuurdatum', 'value' => $date_display, 'modifier' => 'date'];
         }
         if ($due_date_display) {
-            $meta_rows[] = ['label' => 'Vervaldatum', 'value' => $due_date_display];
+            $meta_rows[] = ['label' => 'Vervaldatum', 'value' => $due_date_display, 'modifier' => 'date'];
         }
         $excl_total_display = $subtotal_display;
         if ($excl_total_display === null && $total_value !== null && $tax_value !== null) {
@@ -881,10 +881,10 @@ class Printcom_Order_Tracker {
             $excl_total_display = $total_display;
         }
         if ($excl_total_display !== null) {
-            $meta_rows[] = ['label' => 'Totaal (excl. btw)', 'value' => $excl_total_display];
+            $meta_rows[] = ['label' => 'Totaal (excl. btw)', 'value' => $excl_total_display, 'modifier' => 'amount-subtle'];
         }
         if ($total_display) {
-            $meta_rows[] = ['label' => 'Totaal (incl. btw)', 'value' => $total_display];
+            $meta_rows[] = ['label' => 'Totaal (incl. btw)', 'value' => $total_display, 'modifier' => 'amount-base'];
         }
         $show_balance = false;
         if ($balance_value !== null) {
@@ -897,7 +897,7 @@ class Printcom_Order_Tracker {
         }
         $meta_html = '';
         if ($show_balance && $balance_display) {
-            $meta_rows[] = ['label' => 'Openstaand', 'value' => $balance_display];
+            $meta_rows[] = ['label' => 'Openstaand', 'value' => $balance_display, 'modifier' => 'amount-highlight'];
         }
 
         if ($meta_rows) {
@@ -1856,7 +1856,7 @@ class Printcom_Order_Tracker {
         global $post;
         $content = $post->post_content ?? '';
         if (has_shortcode($content, 'print_order_status')) {
-            wp_enqueue_style('rmh-ot-style', plugins_url('assets/css/order-tracker.css', __FILE__), [], '2.4.3');
+            wp_enqueue_style('rmh-ot-style', plugins_url('assets/css/order-tracker.css', __FILE__), [], '2.4.4');
         }
         if (has_shortcode($content, 'print_order_lookup')) {
             wp_enqueue_style('rmh-order-lookup', plugins_url('assets/css/order-lookup.css', __FILE__), [], '2.1.4');
