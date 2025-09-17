@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     2.3.5
+ * Version:     2.4.0
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -576,9 +576,12 @@ class Printcom_Order_Tracker {
         $nl_status = $this->human_status($data); // geeft NL: "Deels verzonden", "Verzonden", etc.
 
         $invoice_cta_html = '';
+        $invoice_info_html = '';
         $invoice_hint_html = '';
         $invoice_link_found = false;
         $invoice_client_available = false;
+        $invoice_display_details = null;
+        $invoice_portal_link = '';
         if (function_exists('rmh_get_invoice_ninja_client_singleton')) {
             $client = rmh_get_invoice_ninja_client_singleton();
             if ($client instanceof RMH_InvoiceNinja_Client) {
@@ -588,9 +591,8 @@ class Printcom_Order_Tracker {
                     $details = $client->get_invoice_portal_details($invoice_id);
                     if (is_array($details) && !empty($details['link'])) {
                         $invoice_link_found = true;
-                        $is_paid = $details['is_paid'] ?? null;
-                        $button_text = ($is_paid === true) ? 'Bekijk factuur' : 'Bekijk en betaal factuur';
-                        $invoice_cta_html = '<div class="rmh-invoice-cta"><a class="rmh-btn rmh-btn-pay" target="_blank" rel="noopener" href="' . esc_url($details['link']) . '">' . esc_html($button_text) . '</a></div>';
+                        $invoice_display_details = $details;
+                        $invoice_portal_link = (string) $details['link'];
                     }
                 }
             }
@@ -637,19 +639,41 @@ class Printcom_Order_Tracker {
         }
         $overall_status = $this->determine_overall_order_status($data);
 
-        $html  = '<div class="rmh-ot">';
-        if ($invoice_cta_html) {
-            $html .= $invoice_cta_html;
-        }
-        // GEEN header-row meer
+        $count_display = esc_html(number_format_i18n($product_count));
+        $product_label_display = esc_html($product_count === 1 ? 'product' : 'producten');
+        $overall_status_display = esc_html($overall_status);
 
         $summary_html = sprintf(
             'Je bestelling bevat <span class="rmh-ot__summary-count">%s</span> %s, status: <span class="rmh-ot__summary-status">%s</span>.',
-            esc_html(number_format_i18n($product_count)),
-            esc_html($product_count === 1 ? 'product' : 'producten'),
-            esc_html($overall_status)
+            $count_display,
+            $product_label_display,
+            $overall_status_display
         );
-        $html .= '<p class="rmh-ot__summary">' . $summary_html . '</p>';
+        $invoice_summary_html = sprintf(
+            'Je bestelling bevat <span class="rmh-invoice-card__summary-count">%s</span> %s, status: <span class="rmh-invoice-card__summary-status">%s</span>.',
+            $count_display,
+            $product_label_display,
+            $overall_status_display
+        );
+
+        if ($invoice_display_details && $invoice_portal_link !== '') {
+            $invoice_info_html = $this->render_invoice_information_block($invoice_display_details, $invoice_summary_html);
+            $invoice_is_paid_flag = $this->invoice_details_is_paid($invoice_display_details);
+            $button_text = ($invoice_is_paid_flag === true) ? 'Bekijk factuur' : 'Bekijk en betaal factuur';
+            $invoice_cta_html = '<div class="rmh-invoice-cta"><a class="rmh-btn rmh-btn-pay" target="_blank" rel="noopener" href="' . esc_url($invoice_portal_link) . '">' . esc_html($button_text) . '</a></div>';
+        }
+
+        $html  = '<div class="rmh-ot">';
+        if ($invoice_info_html !== '') {
+            $html .= $invoice_info_html;
+        }
+        if ($invoice_cta_html !== '') {
+            $html .= $invoice_cta_html;
+        }
+        if ($invoice_info_html === '') {
+            $html .= '<p class="rmh-ot__summary">' . $summary_html . '</p>';
+        }
+        // GEEN header-row meer
 
         // Tracklinks per itemNumber
         $tracks_by_item=[];
@@ -809,6 +833,213 @@ class Printcom_Order_Tracker {
 
         return $html;
         }
+
+    private function render_invoice_information_block(array $details, string $summary_html): string {
+        $is_paid = $this->invoice_details_is_paid($details);
+        $badge_class = ($is_paid === true) ? 'rmh-invoice-card__badge--paid' : 'rmh-invoice-card__badge--open';
+        $badge_text = ($is_paid === true) ? 'Betaald' : 'Openstaand';
+
+        $invoice_number = '';
+        if (isset($details['invoice_number']) && is_string($details['invoice_number'])) {
+            $invoice_number = trim($details['invoice_number']);
+        }
+        $title = $invoice_number !== '' ? sprintf('Factuur #%s', $invoice_number) : 'Factuur';
+
+        $currency = isset($details['currency']) && is_string($details['currency']) ? $details['currency'] : null;
+        $date_display = $this->format_invoice_date_display($details['invoice_date'] ?? null);
+        $total_display = $this->format_invoice_amount($details['total'] ?? null, $currency);
+        $subtotal_display = $this->format_invoice_amount($details['subtotal'] ?? null, $currency);
+        $tax_display = $this->format_invoice_amount($details['tax'] ?? null, $currency);
+        $balance_value = $details['balance'] ?? null;
+        $balance_display = $this->format_invoice_amount($balance_value, $currency);
+
+        $meta_parts = [];
+        if ($date_display) {
+            $meta_parts[] = ['label' => 'Datum', 'value' => $date_display];
+        }
+        if ($total_display) {
+            $meta_parts[] = ['label' => 'Totaal (incl. btw)', 'value' => $total_display];
+        }
+        $show_balance = false;
+        if ($balance_value !== null) {
+            $numeric_balance = (float) $balance_value;
+            if ($numeric_balance > 0.009) {
+                $show_balance = true;
+            } elseif ($is_paid === false && $numeric_balance > 0) {
+                $show_balance = true;
+            }
+        }
+        if ($show_balance && $balance_display) {
+            $meta_parts[] = ['label' => 'Openstaand', 'value' => $balance_display];
+        }
+
+        $meta_html = '';
+        if ($meta_parts) {
+            $meta_html .= '<div class="rmh-invoice-card__meta">';
+            foreach ($meta_parts as $part) {
+                $meta_html .= '<span class="rmh-invoice-card__meta-item"><span class="rmh-invoice-card__meta-label">' . esc_html($part['label']) . ':</span><span>' . esc_html($part['value']) . '</span></span>';
+            }
+            $meta_html .= '</div>';
+        }
+
+        $small_parts = [];
+        if ($subtotal_display) {
+            $small_parts[] = sprintf('Subtotaal: %s', esc_html($subtotal_display));
+        }
+        if ($tax_display) {
+            $small_parts[] = sprintf('btw: %s', esc_html($tax_display));
+        }
+        $meta_small_html = '';
+        if ($small_parts) {
+            $meta_small_html = '<div class="rmh-invoice-card__meta-small">' . implode(' · ', $small_parts) . '</div>';
+        }
+
+        $html  = '<section class="rmh-invoice-card" aria-label="Factuurinformatie">';
+        $html .=   '<div class="rmh-invoice-card__header">';
+        $html .=     '<h3 class="rmh-invoice-card__title">' . esc_html($title) . '</h3>';
+        $html .=     '<span class="rmh-invoice-card__badge ' . esc_attr($badge_class) . '">' . esc_html($badge_text) . '</span>';
+        $html .=   '</div>';
+        $html .= $meta_html;
+        $html .= $meta_small_html;
+        $html .=   '<p class="rmh-invoice-card__summary">' . $summary_html . '</p>';
+        $html .= '</section>';
+
+        return $html;
+    }
+
+    private function invoice_details_is_paid(array $details): ?bool {
+        $flag = null;
+        if (array_key_exists('is_paid', $details)) {
+            if ($details['is_paid'] === null) {
+                $flag = null;
+            } else {
+                $flag = (bool) $details['is_paid'];
+            }
+        }
+
+        if (array_key_exists('balance', $details) && $details['balance'] !== null) {
+            $balance = (float) $details['balance'];
+            if (abs($balance) <= 0.009) {
+                $flag = true;
+            } elseif ($balance > 0) {
+                $flag = false;
+            } elseif ($balance < 0) {
+                $flag = true;
+            }
+        }
+
+        if ($flag === null && array_key_exists('total', $details) && $details['total'] !== null) {
+            $total = (float) $details['total'];
+            if ($total <= 0) {
+                $flag = true;
+            }
+        }
+
+        return $flag;
+    }
+
+    private function format_invoice_date_display($raw): ?string {
+        if (!is_string($raw)) {
+            return null;
+        }
+
+        $raw = trim($raw);
+        if ($raw === '') {
+            return null;
+        }
+
+        if (function_exists('wp_timezone')) {
+            $timezone = wp_timezone();
+        } else {
+            $tz_string = function_exists('wp_timezone_string') ? wp_timezone_string() : get_option('timezone_string');
+            if (!is_string($tz_string) || $tz_string === '') {
+                $tz_string = 'UTC';
+            }
+            try {
+                $timezone = new \DateTimeZone($tz_string);
+            } catch (\Exception $e) {
+                $timezone = new \DateTimeZone('UTC');
+            }
+        }
+
+        $format = get_option('date_format');
+        if (!is_string($format) || $format === '') {
+            $format = 'j F Y';
+        }
+
+        try {
+            $dt = new \DateTimeImmutable($raw, $timezone);
+            if (function_exists('wp_date')) {
+                return wp_date($format, $dt->getTimestamp(), $timezone);
+            }
+            return date_i18n($format, $dt->getTimestamp(), false);
+        } catch (\Exception $e) {
+            $timestamp = strtotime($raw);
+            if ($timestamp !== false) {
+                if (function_exists('wp_date')) {
+                    return wp_date($format, $timestamp, $timezone);
+                }
+                return date_i18n($format, $timestamp, false);
+            }
+
+            if (preg_match('/^\d{8}$/', $raw)) {
+                $ts = strtotime(substr($raw, 0, 4) . '-' . substr($raw, 4, 2) . '-' . substr($raw, 6, 2));
+                if ($ts !== false) {
+                    if (function_exists('wp_date')) {
+                        return wp_date($format, $ts, $timezone);
+                    }
+                    return date_i18n($format, $ts, false);
+                }
+            }
+        }
+
+        return $raw;
+    }
+
+    private function format_invoice_amount($amount, ?string $currency): ?string {
+        if (!is_numeric($amount)) {
+            return null;
+        }
+
+        $formatted = number_format_i18n((float) $amount, 2);
+        $symbol = $this->currency_symbol_for_code($currency);
+        if ($symbol) {
+            return $symbol . ' ' . $formatted;
+        }
+
+        if (is_string($currency) && $currency !== '') {
+            return $formatted . ' ' . strtoupper($currency);
+        }
+
+        return '€ ' . $formatted;
+    }
+
+    private function currency_symbol_for_code(?string $currency): ?string {
+        if (!is_string($currency)) {
+            return null;
+        }
+
+        $code = strtoupper(trim($currency));
+        if ($code === '') {
+            return null;
+        }
+
+        $map = [
+            'EUR' => '€',
+            'USD' => '$',
+            'GBP' => '£',
+            'CHF' => 'CHF',
+            'AUD' => 'A$',
+            'CAD' => 'C$',
+            'SEK' => 'kr',
+            'NOK' => 'kr',
+            'DKK' => 'kr',
+            'PLN' => 'zł',
+            'CZK' => 'Kč',
+        ];
+
+        return $map[$code] ?? null;
+    }
 
     private function resolve_invoice_ninja_invoice_id($map_entry, array $order_data, string $own_order, string $print_order): ?string {
         if (!is_array($map_entry)) {
@@ -1570,7 +1801,7 @@ class Printcom_Order_Tracker {
         global $post;
         $content = $post->post_content ?? '';
         if (has_shortcode($content, 'print_order_status')) {
-            wp_enqueue_style('rmh-ot-style', plugins_url('assets/css/order-tracker.css', __FILE__), [], '2.3.5');
+            wp_enqueue_style('rmh-ot-style', plugins_url('assets/css/order-tracker.css', __FILE__), [], '2.4.0');
         }
         if (has_shortcode($content, 'print_order_lookup')) {
             wp_enqueue_style('rmh-order-lookup', plugins_url('assets/css/order-lookup.css', __FILE__), [], '2.1.4');
