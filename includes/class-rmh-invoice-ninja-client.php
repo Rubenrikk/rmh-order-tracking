@@ -67,7 +67,10 @@ class RMH_InvoiceNinja_Client {
      *     balance:?float,
      *     subtotal:?float,
      *     tax:?float,
-     *     currency:?string
+     *     currency:?string,
+     *     invoice_status:?string,
+     *     is_partially_paid:?bool,
+     *     is_overdue:?bool
      * }|null
      */
     public function get_invoice_portal_details( $invoice_id ): ?array {
@@ -431,6 +434,70 @@ class RMH_InvoiceNinja_Client {
         return null;
     }
 
+    private function determine_invoice_partially_paid_state( ?string $status, ?float $total, ?float $balance, ?float $paid_to_date ): ?bool {
+        $normalized_status = is_string( $status ) ? strtolower( trim( $status ) ) : null;
+        if ( $normalized_status ) {
+            if ( in_array( $normalized_status, [ 'partial', 'partial_payment', 'partially_paid', 'partially paid' ], true ) ) {
+                return true;
+            }
+            if ( in_array( $normalized_status, [ 'paid', 'paid in full', 'paid_in_full', 'paid-in-full' ], true ) ) {
+                return false;
+            }
+        }
+
+        if ( null !== $paid_to_date && null !== $total ) {
+            if ( $paid_to_date > 0.0001 && ( $total - $paid_to_date ) > 0.0001 ) {
+                return true;
+            }
+            if ( $total > 0 && ( $paid_to_date + 0.0001 ) >= $total ) {
+                return false;
+            }
+        }
+
+        if ( null !== $balance && null !== $total ) {
+            if ( $balance > 0.0001 && $total > 0 && $balance < $total ) {
+                return true;
+            }
+            if ( $balance <= 0.0001 ) {
+                return false;
+            }
+        }
+
+        return null;
+    }
+
+    private function determine_invoice_overdue_state( ?string $status, ?string $due_date, ?float $balance ): ?bool {
+        $normalized_status = is_string( $status ) ? strtolower( trim( $status ) ) : null;
+        if ( $normalized_status ) {
+            if ( in_array( $normalized_status, [ 'past_due', 'past-due', 'overdue' ], true ) ) {
+                return true;
+            }
+            if ( in_array( $normalized_status, [ 'paid', 'paid in full', 'paid_in_full', 'paid-in-full', 'draft', 'sent', 'viewed', 'approved' ], true ) ) {
+                return false;
+            }
+        }
+
+        if ( is_string( $due_date ) && $due_date !== '' ) {
+            $timestamp = strtotime( $due_date );
+            if ( false !== $timestamp ) {
+                $now = function_exists( 'current_time' ) ? current_time( 'timestamp' ) : time();
+                $has_balance = ( null === $balance ) ? true : ( $balance > 0.0001 );
+                if ( $timestamp < $now && $has_balance ) {
+                    return true;
+                }
+                if ( $timestamp >= $now ) {
+                    return false;
+                }
+            }
+        }
+
+        if ( null !== $balance && $balance <= 0.0001 ) {
+            return false;
+        }
+
+        return null;
+    }
+
     /**
      * Build the invoice detail array from the Invoice Ninja payload.
      *
@@ -444,17 +511,31 @@ class RMH_InvoiceNinja_Client {
             $invoice = [];
         }
 
+        $invoice_number = $this->extract_string_value( $invoice, [ 'invoice_number', 'number', 'id_number', 'po_number' ] );
+        $invoice_date   = $this->extract_string_value( $invoice, [ 'date', 'invoice_date', 'invoicedate', 'created_at' ] );
+        $due_date       = $this->extract_string_value( $invoice, [ 'due_date', 'dueDate', 'due', 'due_on', 'due_at', 'expires_at', 'valid_until' ] );
+        $total          = $this->extract_numeric_value( $invoice, [ 'amount', 'total', 'amount_raw' ] );
+        $balance        = $this->extract_numeric_value( $invoice, [ 'balance', 'balance_raw', 'outstanding', 'amount_due', 'amountdue' ] );
+        $subtotal       = $this->extract_numeric_value( $invoice, [ 'subtotal', 'sub_total', 'amount_less_tax', 'total_less_tax' ] );
+        $tax            = $this->extract_numeric_value( $invoice, [ 'tax_total', 'tax', 'total_taxes', 'tax_amount' ] );
+        $currency       = $this->extract_currency_code_from_invoice( $invoice );
+        $status         = $this->extract_string_value( $invoice, [ 'status', 'invoice_status', 'status_label' ] );
+        $paid_to_date   = $this->extract_numeric_value( $invoice, [ 'paid_to_date', 'paidToDate', 'paid_amount' ] );
+
         return [
-            'link'           => $link,
-            'is_paid'        => $this->determine_invoice_paid_status( $payload ),
-            'invoice_number' => $this->extract_string_value( $invoice, [ 'invoice_number', 'number', 'id_number', 'po_number' ] ),
-            'invoice_date'   => $this->extract_string_value( $invoice, [ 'date', 'invoice_date', 'invoicedate', 'created_at' ] ),
-            'due_date'       => $this->extract_string_value( $invoice, [ 'due_date', 'dueDate', 'due', 'due_on', 'due_at', 'expires_at', 'valid_until' ] ),
-            'total'          => $this->extract_numeric_value( $invoice, [ 'amount', 'total', 'amount_raw' ] ),
-            'balance'        => $this->extract_numeric_value( $invoice, [ 'balance', 'balance_raw', 'outstanding', 'amount_due', 'amountdue' ] ),
-            'subtotal'       => $this->extract_numeric_value( $invoice, [ 'subtotal', 'sub_total', 'amount_less_tax', 'total_less_tax' ] ),
-            'tax'            => $this->extract_numeric_value( $invoice, [ 'tax_total', 'tax', 'total_taxes', 'tax_amount' ] ),
-            'currency'       => $this->extract_currency_code_from_invoice( $invoice ),
+            'link'              => $link,
+            'is_paid'           => $this->determine_invoice_paid_status( $payload ),
+            'invoice_number'    => $invoice_number,
+            'invoice_date'      => $invoice_date,
+            'due_date'          => $due_date,
+            'total'             => $total,
+            'balance'           => $balance,
+            'subtotal'          => $subtotal,
+            'tax'               => $tax,
+            'currency'          => $currency,
+            'invoice_status'    => $status,
+            'is_partially_paid' => $this->determine_invoice_partially_paid_state( $status, $total, $balance, $paid_to_date ),
+            'is_overdue'        => $this->determine_invoice_overdue_state( $status, $due_date, $balance ),
         ];
     }
 
@@ -475,16 +556,19 @@ class RMH_InvoiceNinja_Client {
         }
 
         $normalized = [
-            'link'           => $link,
-            'is_paid'        => null,
-            'invoice_number' => null,
-            'invoice_date'   => null,
-            'due_date'       => null,
-            'total'          => null,
-            'balance'        => null,
-            'subtotal'       => null,
-            'tax'            => null,
-            'currency'       => null,
+            'link'              => $link,
+            'is_paid'           => null,
+            'invoice_number'    => null,
+            'invoice_date'      => null,
+            'due_date'          => null,
+            'total'             => null,
+            'balance'           => null,
+            'subtotal'          => null,
+            'tax'               => null,
+            'currency'          => null,
+            'invoice_status'    => null,
+            'is_partially_paid' => null,
+            'is_overdue'        => null,
         ];
 
         if ( array_key_exists( 'is_paid', $details ) ) {
@@ -505,7 +589,7 @@ class RMH_InvoiceNinja_Client {
             }
         }
 
-        foreach ( [ 'invoice_number', 'invoice_date', 'due_date', 'currency' ] as $string_key ) {
+        foreach ( [ 'invoice_number', 'invoice_date', 'due_date', 'currency', 'invoice_status' ] as $string_key ) {
             if ( isset( $details[ $string_key ] ) && is_string( $details[ $string_key ] ) ) {
                 $value = trim( $details[ $string_key ] );
                 if ( $value !== '' ) {
@@ -531,7 +615,59 @@ class RMH_InvoiceNinja_Client {
             }
         }
 
+        if ( array_key_exists( 'is_partially_paid', $details ) ) {
+            $normalized['is_partially_paid'] = $this->coerce_flag_value(
+                $details['is_partially_paid'],
+                [ 'partial', 'partially_paid', 'partially paid' ],
+                [ 'paid', 'paid in full', 'paid_in_full', 'paid-in-full', 'settled', 'complete', 'completed' ]
+            );
+        }
+
+        if ( array_key_exists( 'is_overdue', $details ) ) {
+            $normalized['is_overdue'] = $this->coerce_flag_value(
+                $details['is_overdue'],
+                [ 'overdue', 'past_due', 'past-due' ],
+                [ 'paid', 'paid in full', 'paid_in_full', 'paid-in-full', 'draft', 'sent', 'viewed', 'approved', 'settled' ]
+            );
+        }
+
         return $normalized;
+    }
+
+    private function coerce_flag_value( $value, array $truthy_strings = [], array $falsey_strings = [] ): ?bool {
+        if ( null === $value ) {
+            return null;
+        }
+
+        if ( is_bool( $value ) ) {
+            return $value;
+        }
+
+        if ( is_numeric( $value ) ) {
+            return ( (int) $value ) === 1;
+        }
+
+        if ( ! is_string( $value ) ) {
+            return null;
+        }
+
+        $normalized = strtolower( trim( $value ) );
+        if ( $normalized === '' ) {
+            return null;
+        }
+
+        $truthy = array_map( 'strtolower', array_merge( [ '1', 'true', 'yes', 'y' ], $truthy_strings ) );
+        $falsey = array_map( 'strtolower', array_merge( [ '0', 'false', 'no', 'n' ], $falsey_strings ) );
+
+        if ( in_array( $normalized, $truthy, true ) ) {
+            return true;
+        }
+
+        if ( in_array( $normalized, $falsey, true ) ) {
+            return false;
+        }
+
+        return null;
     }
 
     /**

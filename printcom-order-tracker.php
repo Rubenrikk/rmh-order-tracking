@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     2.4.6
+ * Version:     2.4.8
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -645,16 +645,15 @@ class Printcom_Order_Tracker {
         }
         $overall_status = $this->determine_overall_order_status($data);
 
-        $count_display = esc_html(number_format_i18n($product_count));
-        $product_label_display = esc_html($product_count === 1 ? 'product' : 'producten');
-        $overall_status_display = esc_html($overall_status);
+        $intro_progress_text = $this->build_intro_summary($product_count, $overall_status, $data, $invoice_display_details);
 
-        $progress_text_html = sprintf(
-            'Je bestelling bevat <span class="rmh-order-progress__count rmh-ot__summary-count">%s</span> %s, status: <span class="rmh-order-progress__status rmh-ot__summary-status">%s</span>.',
-            $count_display,
-            $product_label_display,
-            $overall_status_display
-        );
+        $summary_fragments = [];
+        if ($intro_progress_text !== '') {
+            $summary_fragments[] = '<span class="rmh-ot__summary-text rmh-ot__summary-text--desktop">' . $intro_progress_text . '</span>';
+            $summary_fragments[] = '<span class="rmh-ot__summary-text rmh-ot__summary-text--mobile">' . $intro_progress_text . '</span>';
+        }
+
+        $progress_text_html = implode('', $summary_fragments);
 
         $invoice_info_html = '';
         $invoice_cta_button_html = '';
@@ -847,8 +846,35 @@ class Printcom_Order_Tracker {
 
     private function render_invoice_information_block(array $details, string $cta_button_html = ''): string {
         $is_paid = $this->invoice_details_is_paid($details);
-        $badge_class = ($is_paid === true) ? 'rmh-invoice-card__badge--paid' : 'rmh-invoice-card__badge--open';
-        $badge_text = ($is_paid === true) ? 'Betaald' : 'Openstaand';
+        $is_partially_paid = $this->get_invoice_detail_flag($details, 'is_partially_paid');
+
+        $badge_classes = ['rmh-invoice-card__badge'];
+        $badge_classes[] = ($is_paid === true) ? 'rmh-invoice-card__badge--paid' : 'rmh-invoice-card__badge--open';
+
+        $desktop_badge_text = ($is_paid === true) ? 'Betaald' : 'Openstaand';
+        $mobile_badge_text = '';
+        $badge_aria_label = $desktop_badge_text;
+        $hide_mobile_badge = false;
+
+        if ($is_paid === true) {
+            $mobile_badge_text = 'Betaald';
+            $badge_aria_label = $mobile_badge_text;
+        } elseif ($is_partially_paid === true) {
+            $mobile_badge_text = 'Deels betaald';
+            $badge_classes[] = 'rmh-invoice-card__badge--partial';
+            $badge_aria_label = $mobile_badge_text;
+        } else {
+            $hide_mobile_badge = true;
+        }
+
+        if ($hide_mobile_badge === true) {
+            $badge_classes[] = 'rmh-invoice-card__badge--mobile-hidden';
+        }
+
+        $badge_inner_html = '<span class="rmh-invoice-card__badge-text-desktop">' . esc_html($desktop_badge_text) . '</span>';
+        if ($mobile_badge_text !== '') {
+            $badge_inner_html .= '<span class="rmh-invoice-card__badge-text-mobile">' . esc_html($mobile_badge_text) . '</span>';
+        }
 
         $invoice_number = '';
         if (isset($details['invoice_number']) && is_string($details['invoice_number'])) {
@@ -917,7 +943,7 @@ class Printcom_Order_Tracker {
         $html .=   '<section class="rmh-invoice-card" aria-label="Factuurinformatie">';
         $html .=   '<div class="rmh-invoice-card__header">';
         $html .=     '<h3 class="rmh-invoice-card__title">' . esc_html($title) . '</h3>';
-        $html .=     '<span class="rmh-invoice-card__badge ' . esc_attr($badge_class) . '">' . esc_html($badge_text) . '</span>';
+        $html .=     '<span class="' . esc_attr(implode(' ', $badge_classes)) . '" aria-label="' . esc_attr($badge_aria_label) . '">' . $badge_inner_html . '</span>';
         $html .=   '</div>';
         $html .= $meta_html;
         if ($cta_button_html !== '') {
@@ -927,6 +953,139 @@ class Printcom_Order_Tracker {
         $html .= '</div>';
 
         return $html;
+    }
+
+    private function build_intro_summary(int $product_count, string $overall_status, array $order_data, ?array $invoice_details): string {
+        $count_display = esc_html(number_format_i18n($product_count));
+        $product_label = esc_html($product_count === 1 ? 'product' : 'producten');
+
+        $sentences = [];
+        $sentences[] = sprintf(
+            'Je bestelling bevat <span class="rmh-order-progress__count rmh-ot__summary-count">%s</span> %s.',
+            $count_display,
+            $product_label
+        );
+
+        $order_sentence = $this->build_order_status_sentence($overall_status, $order_data);
+        if ($order_sentence !== '') {
+            $sentences[] = $order_sentence;
+        }
+
+        $invoice_sentence = $this->build_invoice_sentence($invoice_details);
+        if ($invoice_sentence !== '') {
+            $sentences[] = $invoice_sentence;
+        }
+
+        $sentences = array_values(array_filter($sentences));
+        if (!$sentences) {
+            return '';
+        }
+
+        return implode(' ', $sentences);
+    }
+
+    private function build_order_status_sentence(string $overall_status, array $order_data): string {
+        $candidate_statuses = [];
+        foreach (['order_status', 'orderStatus', 'status', 'statusCode', 'orderStatusCode'] as $status_key) {
+            if (!empty($order_data[$status_key]) && is_string($order_data[$status_key])) {
+                $candidate_statuses[] = strtolower(trim((string) $order_data[$status_key]));
+            }
+        }
+
+        $normalized_code = '';
+        foreach ($candidate_statuses as $candidate) {
+            $normalized = str_replace([' ', '-'], '_', $candidate);
+            if ($normalized !== '') {
+                $normalized_code = $normalized;
+                break;
+            }
+        }
+
+        $status_phrase = '';
+        if ($normalized_code !== '') {
+            if (in_array($normalized_code, ['delivered', 'bezorgd'], true)) {
+                $status_phrase = 'geleverd';
+            } elseif (in_array($normalized_code, ['partially_delivered', 'partial_delivered', 'partially_shipped', 'gedeeltelijk_verzonden'], true)) {
+                $status_phrase = 'deels geleverd';
+            } elseif (in_array($normalized_code, ['shipped', 'verzonden', 'in_transit', 'intransit'], true)) {
+                $status_phrase = 'verzonden';
+            } elseif (in_array($normalized_code, ['readyforproduction', 'ready_for_production', 'in_production', 'production', 'printed', 'finished', 'acceptedbysupplier', 'accepted_by_supplier'], true)) {
+                $status_phrase = 'in productie';
+            } elseif (in_array($normalized_code, ['processing', 'orderreceived', 'order_received', 'draft', 'manualcheck', 'in_behandeling'], true)) {
+                $status_phrase = 'in behandeling';
+            } elseif (in_array($normalized_code, ['cancelled', 'canceled', 'geannuleerd'], true)) {
+                $status_phrase = 'geannuleerd';
+            }
+        }
+
+        if ($status_phrase === '') {
+            $overall_lower = strtolower($overall_status);
+            if (strpos($overall_lower, 'geannuleerd') !== false) {
+                $status_phrase = 'geannuleerd';
+            } elseif (strpos($overall_lower, 'gedeeltelijk') !== false || strpos($overall_lower, 'deels') !== false) {
+                $status_phrase = 'deels geleverd';
+            } elseif (strpos($overall_lower, 'geleverd') !== false || strpos($overall_lower, 'bezorgd') !== false) {
+                $status_phrase = 'geleverd';
+            } elseif (strpos($overall_lower, 'verzonden') !== false) {
+                $status_phrase = 'verzonden';
+            } elseif (strpos($overall_lower, 'productie') !== false) {
+                $status_phrase = 'in productie';
+            } elseif (strpos($overall_lower, 'behandeling') !== false) {
+                $status_phrase = 'in behandeling';
+            }
+        }
+
+        if ($status_phrase === '') {
+            $status_phrase = 'in behandeling';
+        }
+
+        return 'Je bestelling is <span class="rmh-order-progress__status rmh-ot__summary-status">' . esc_html($status_phrase) . '</span>.';
+    }
+
+    private function build_invoice_sentence(?array $invoice_details): string {
+        if (!is_array($invoice_details) || !$invoice_details) {
+            return '';
+        }
+
+        $is_paid = $this->invoice_details_is_paid($invoice_details);
+        $is_partially_paid = $this->get_invoice_detail_flag($invoice_details, 'is_partially_paid');
+        $is_overdue = $this->get_invoice_detail_flag($invoice_details, 'is_overdue');
+
+        if ($is_paid === true) {
+            return 'De factuur is betaald. Hieronder vind je het overzicht van je factuur en bestelling.';
+        }
+
+        if ($is_partially_paid === true) {
+            return 'De factuur is deels betaald. Je kunt het resterende bedrag hieronder voldoen.';
+        }
+
+        $invoice_open = ($is_paid === false || $is_paid === null);
+        if ($invoice_open && $is_overdue === true) {
+            return 'De factuur staat open en is vervallen. Je kunt hieronder direct betalen.';
+        }
+
+        if ($invoice_open) {
+            return 'De factuur staat open. Je kunt hieronder direct betalen.';
+        }
+
+        if ($is_overdue === true) {
+            return 'De factuur staat open en is vervallen. Je kunt hieronder direct betalen.';
+        }
+
+        return 'Hieronder vind je het overzicht van je factuur en bestelling.';
+    }
+
+    private function get_invoice_detail_flag(array $details, string $key): ?bool {
+        if (!array_key_exists($key, $details)) {
+            return null;
+        }
+
+        $value = $details[$key];
+        if ($value === null) {
+            return null;
+        }
+
+        return (bool) $value;
     }
 
     private function invoice_details_is_paid(array $details): ?bool {
@@ -1856,7 +2015,7 @@ class Printcom_Order_Tracker {
         global $post;
         $content = $post->post_content ?? '';
         if (has_shortcode($content, 'print_order_status')) {
-            wp_enqueue_style('rmh-ot-style', plugins_url('assets/css/order-tracker.css', __FILE__), [], '2.4.6');
+            wp_enqueue_style('rmh-ot-style', plugins_url('assets/css/order-tracker.css', __FILE__), [], '2.4.8');
         }
         if (has_shortcode($content, 'print_order_lookup')) {
             wp_enqueue_style('rmh-order-lookup', plugins_url('assets/css/order-lookup.css', __FILE__), [], '2.1.4');
