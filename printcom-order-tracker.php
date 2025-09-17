@@ -501,8 +501,14 @@ class Printcom_Order_Tracker {
                 $postcode_invalid = true;
             } else {
                 $maps = get_option(self::OPT_MAPPINGS, []);
-                if (!empty($maps[$order_val])) {
-                    $map  = $maps[$order_val];
+                $map = null;
+                foreach ($maps as $stored_order => $entry) {
+                    if (strcasecmp((string) $stored_order, $order_val) === 0) {
+                        $map = $entry;
+                        break;
+                    }
+                }
+                if (is_array($map)) {
                     $data = $this->api_get_order($map['print_order']);
                     if (!is_wp_error($data)) {
                         $addr   = $this->extract_primary_shipping_address($data);
