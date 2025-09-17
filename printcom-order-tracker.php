@@ -478,6 +478,40 @@ class Printcom_Order_Tracker {
         return in_array($pid, $this->get_managed_page_ids(), true);
     }
 
+    /**
+     * Zoek de mapping voor een eigen ordernummer en geef zowel de originele sleutel als de entry terug.
+     *
+     * @param array  $maps  Gehele mappings-array uit de database.
+     * @param string $order Het gezochte ordernummer.
+     * @return array|null   ['order' => string, 'entry' => array] of null bij geen match.
+     */
+    private function find_mapping_for_order(array $maps, string $order): ?array {
+        if (isset($maps[$order]) && is_array($maps[$order])) {
+            return [
+                'order' => $order,
+                'entry' => $maps[$order],
+            ];
+        }
+
+        $normalized = strtolower($order);
+        foreach ($maps as $stored_order => $entry) {
+            if (!is_array($entry)) {
+                continue;
+            }
+            if (!is_string($stored_order) && !is_numeric($stored_order)) {
+                continue;
+            }
+            if (strtolower((string) $stored_order) === $normalized) {
+                return [
+                    'order' => (string) $stored_order,
+                    'entry' => $entry,
+                ];
+            }
+        }
+
+        return null;
+    }
+
     /* ===== Shortcode ===== */
 
 
@@ -500,9 +534,11 @@ class Printcom_Order_Tracker {
                 $error = 'Vul een geldige postcode in (bijv. 1234AB).';
                 $postcode_invalid = true;
             } else {
-                $maps = get_option(self::OPT_MAPPINGS, []);
-                if (!empty($maps[$order_val])) {
-                    $map  = $maps[$order_val];
+                $maps_raw = get_option(self::OPT_MAPPINGS, []);
+                $maps = is_array($maps_raw) ? $maps_raw : [];
+                $match = $this->find_mapping_for_order($maps, $order_val);
+                if ($match && !empty($match['entry']['print_order'])) {
+                    $map  = $match['entry'];
                     $data = $this->api_get_order($map['print_order']);
                     if (!is_wp_error($data)) {
                         $addr   = $this->extract_primary_shipping_address($data);
@@ -544,9 +580,13 @@ class Printcom_Order_Tracker {
         $own = trim($atts['order']);
         if ($own==='') return '<div class="rmh-ot rmh-ot--error">Geen ordernummer opgegeven.</div>';
 
-        $maps = get_option(self::OPT_MAPPINGS, []);
-        if (empty($maps[$own])) return '<div class="rmh-ot rmh-ot--error">Onbekend ordernummer.</div>';
-        $map            = $maps[$own];
+        $maps_raw = get_option(self::OPT_MAPPINGS, []);
+        $maps = is_array($maps_raw) ? $maps_raw : [];
+        $match = $this->find_mapping_for_order($maps, $own);
+        if (!$match) return '<div class="rmh-ot rmh-ot--error">Onbekend ordernummer.</div>';
+
+        $own            = $match['order'];
+        $map            = $match['entry'];
         $token          = $map['token'] ?? '';
         $orderNum       = $map['print_order'];
         $requestedToken = isset($_GET['token']) ? sanitize_text_field(wp_unslash($_GET['token'])) : '';
