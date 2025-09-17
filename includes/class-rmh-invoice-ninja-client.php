@@ -57,7 +57,17 @@ class RMH_InvoiceNinja_Client {
      * Retrieve the portal link and payment status for a given invoice.
      *
      * @param mixed $invoice_id Invoice identifier as provided by Invoice Ninja.
-     * @return array{link:string,is_paid:bool|null}|null
+     * @return array{
+     *     link:string,
+     *     is_paid:bool|null,
+     *     invoice_number:?string,
+     *     invoice_date:?string,
+     *     total:?float,
+     *     balance:?float,
+     *     subtotal:?float,
+     *     tax:?float,
+     *     currency:?string
+     * }|null
      */
     public function get_invoice_portal_details( $invoice_id ): ?array {
         $invoice = is_scalar( $invoice_id ) ? trim( (string) $invoice_id ) : '';
@@ -74,28 +84,21 @@ class RMH_InvoiceNinja_Client {
                 if ( ! empty( $cached['missing'] ) ) {
                     return null;
                 }
-
-                $link    = isset( $cached['link'] ) && is_string( $cached['link'] ) ? trim( $cached['link'] ) : '';
-                $is_paid = null;
-                if ( array_key_exists( 'is_paid', $cached ) ) {
-                    if ( $cached['is_paid'] === null ) {
-                        $is_paid = null;
-                    } else {
-                        $is_paid = (bool) $cached['is_paid'];
-                    }
-                }
-
-                if ( $link !== '' ) {
-                    return [
-                        'link'    => $link,
-                        'is_paid' => $is_paid,
-                    ];
+                $normalized = $this->sanitize_invoice_details( $cached );
+                if ( null !== $normalized ) {
+                    return $normalized;
                 }
             } elseif ( is_string( $cached ) && $cached !== '' ) {
-                return [
-                    'link'    => trim( $cached ),
-                    'is_paid' => null,
-                ];
+                $normalized = $this->sanitize_invoice_details(
+                    [
+                        'link'    => $cached,
+                        'is_paid' => null,
+                    ]
+                );
+
+                if ( null !== $normalized ) {
+                    return $normalized;
+                }
             }
         }
 
@@ -148,23 +151,19 @@ class RMH_InvoiceNinja_Client {
                     return null;
                 }
 
-                $is_paid = $this->determine_invoice_paid_status( $data );
+                $details = $this->build_invoice_details_from_payload( $data, $link );
+                $details = $this->sanitize_invoice_details( $details );
 
-                $details = [
-                    'link'       => $link,
-                    'is_paid'    => $is_paid,
-                    'invoice_id' => $resolved_invoice,
-                ];
+                if ( null === $details ) {
+                    return null;
+                }
 
                 if ( $this->cache_ttl > 0 ) {
                     set_transient( $cache_key, $details, $this->cache_ttl );
                     set_transient( $resolved_cache_key, $resolved_invoice, $this->cache_ttl );
                 }
 
-                return [
-                    'link'    => $link,
-                    'is_paid' => $is_paid,
-                ];
+                return $details;
             }
 
             if ( ( 404 === $status || 422 === $status ) && ! $attempted_number_lookup && $resolved_invoice === $invoice ) {
@@ -425,6 +424,153 @@ class RMH_InvoiceNinja_Client {
             }
             if ( in_array( $normalized, [ 'partial', 'past_due', 'overdue', 'sent', 'draft', 'viewed', 'approved', 'unpaid' ], true ) ) {
                 return false;
+            }
+        }
+
+        return null;
+    }
+
+    /**
+     * Build the invoice detail array from the Invoice Ninja payload.
+     *
+     * @param array  $payload Invoice response payload.
+     * @param string $link    Client portal link.
+     * @return array
+     */
+    private function build_invoice_details_from_payload( array $payload, string $link ): array {
+        $invoice = $this->extract_invoice_record( $payload );
+        if ( ! is_array( $invoice ) ) {
+            $invoice = [];
+        }
+
+        return [
+            'link'           => $link,
+            'is_paid'        => $this->determine_invoice_paid_status( $payload ),
+            'invoice_number' => $this->extract_string_value( $invoice, [ 'invoice_number', 'number', 'id_number', 'po_number' ] ),
+            'invoice_date'   => $this->extract_string_value( $invoice, [ 'date', 'invoice_date', 'invoicedate', 'created_at' ] ),
+            'total'          => $this->extract_numeric_value( $invoice, [ 'amount', 'total', 'amount_raw' ] ),
+            'balance'        => $this->extract_numeric_value( $invoice, [ 'balance', 'balance_raw', 'outstanding', 'amount_due', 'amountdue' ] ),
+            'subtotal'       => $this->extract_numeric_value( $invoice, [ 'subtotal', 'sub_total', 'amount_less_tax', 'total_less_tax' ] ),
+            'tax'            => $this->extract_numeric_value( $invoice, [ 'tax_total', 'tax', 'total_taxes', 'tax_amount' ] ),
+            'currency'       => $this->extract_currency_code_from_invoice( $invoice ),
+        ];
+    }
+
+    /**
+     * Sanitize invoice details before returning/caching them.
+     *
+     * @param array $details Raw invoice details.
+     * @return array|null
+     */
+    private function sanitize_invoice_details( array $details ): ?array {
+        $link = '';
+        if ( isset( $details['link'] ) && is_string( $details['link'] ) ) {
+            $link = trim( $details['link'] );
+        }
+
+        if ( $link === '' ) {
+            return null;
+        }
+
+        $normalized = [
+            'link'           => $link,
+            'is_paid'        => null,
+            'invoice_number' => null,
+            'invoice_date'   => null,
+            'total'          => null,
+            'balance'        => null,
+            'subtotal'       => null,
+            'tax'            => null,
+            'currency'       => null,
+        ];
+
+        if ( array_key_exists( 'is_paid', $details ) ) {
+            $value = $details['is_paid'];
+            if ( null === $value ) {
+                $normalized['is_paid'] = null;
+            } elseif ( is_bool( $value ) ) {
+                $normalized['is_paid'] = $value;
+            } elseif ( is_numeric( $value ) ) {
+                $normalized['is_paid'] = ( (int) $value ) === 1;
+            } elseif ( is_string( $value ) ) {
+                $flag = strtolower( trim( $value ) );
+                if ( in_array( $flag, [ '1', 'true', 'yes', 'paid' ], true ) ) {
+                    $normalized['is_paid'] = true;
+                } elseif ( in_array( $flag, [ '0', 'false', 'no', 'unpaid', 'open' ], true ) ) {
+                    $normalized['is_paid'] = false;
+                }
+            }
+        }
+
+        foreach ( [ 'invoice_number', 'invoice_date', 'currency' ] as $string_key ) {
+            if ( isset( $details[ $string_key ] ) && is_string( $details[ $string_key ] ) ) {
+                $value = trim( $details[ $string_key ] );
+                if ( $value !== '' ) {
+                    if ( 'currency' === $string_key ) {
+                        $value = strtoupper( $value );
+                    }
+                    $normalized[ $string_key ] = $value;
+                }
+            }
+        }
+
+        foreach ( [ 'total', 'balance', 'subtotal', 'tax' ] as $numeric_key ) {
+            if ( array_key_exists( $numeric_key, $details ) ) {
+                $value = $details[ $numeric_key ];
+                if ( is_numeric( $value ) ) {
+                    $normalized[ $numeric_key ] = (float) $value;
+                } elseif ( is_string( $value ) ) {
+                    $normalized_value = str_replace( ',', '.', $value );
+                    if ( is_numeric( $normalized_value ) ) {
+                        $normalized[ $numeric_key ] = (float) $normalized_value;
+                    }
+                }
+            }
+        }
+
+        return $normalized;
+    }
+
+    /**
+     * Attempt to extract a currency code from the invoice payload.
+     *
+     * @param array $invoice Invoice data array.
+     * @return string|null
+     */
+    private function extract_currency_code_from_invoice( array $invoice ): ?string {
+        $direct = $this->extract_string_value( $invoice, [ 'currency_code', 'currency_key', 'currency_name' ] );
+        if ( null !== $direct ) {
+            $code = strtoupper( trim( $direct ) );
+            if ( $code !== '' ) {
+                return $code;
+            }
+        }
+
+        if ( isset( $invoice['currency'] ) ) {
+            $currency_field = $invoice['currency'];
+            if ( is_array( $currency_field ) ) {
+                $inner = $this->extract_string_value( $currency_field, [ 'code', 'currency_code', 'key', 'name' ] );
+                if ( null !== $inner ) {
+                    $code = strtoupper( trim( $inner ) );
+                    if ( $code !== '' ) {
+                        return $code;
+                    }
+                }
+            } elseif ( is_string( $currency_field ) && $currency_field !== '' ) {
+                $code = strtoupper( trim( $currency_field ) );
+                if ( $code !== '' ) {
+                    return $code;
+                }
+            }
+        }
+
+        if ( isset( $invoice['settings'] ) && is_array( $invoice['settings'] ) ) {
+            $inner = $this->extract_string_value( $invoice['settings'], [ 'currency_code', 'currency', 'currency_key' ] );
+            if ( null !== $inner ) {
+                $code = strtoupper( trim( $inner ) );
+                if ( $code !== '' ) {
+                    return $code;
+                }
             }
         }
 
