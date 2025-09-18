@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     2.4.10
+ * Version:     2.4.11
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -13,6 +13,9 @@ if (!defined('ABSPATH')) exit;
 require_once plugin_dir_path(__FILE__) . 'includes/class-rmh-invoice-ninja-client.php';
 
 class Printcom_Order_Tracker {
+    public const PLUGIN_VERSION = '2.4.11';
+    public const USER_AGENT     = 'RMH-Printcom-Tracker/1.6.1 (+WordPress)';
+
     const OPT_SETTINGS     = 'printcom_ot_settings';
     const OPT_MAPPINGS     = 'printcom_ot_mappings';
     const OPT_STATE        = 'printcom_ot_state';
@@ -23,6 +26,9 @@ class Printcom_Order_Tracker {
 
     /** @var int[]|null Cached lijst met door de plugin beheerde orderpagina's (per request). */
     private $managed_page_ids = null;
+
+    /** @var array|null Cache van plugin-instellingen voor deze request. */
+    private $settings_cache = null;
 
     public function __construct() {
         add_action('admin_menu', [$this, 'admin_menu']);
@@ -57,16 +63,44 @@ class Printcom_Order_Tracker {
         }
     }
     public static function deactivate() {
-        if ($ts = wp_next_scheduled('printcom_ot_cron_refresh_token')) wp_unschedule_event($ts, 'printcom_ot_cron_refresh_token');
-        if ($ts = wp_next_scheduled('printcom_ot_cron_warm_cache'))   wp_unschedule_event($ts, 'printcom_ot_cron_warm_cache');
+        if ($ts = wp_next_scheduled('printcom_ot_cron_refresh_token')) {
+            wp_unschedule_event($ts, 'printcom_ot_cron_refresh_token');
+        }
+        if ($ts = wp_next_scheduled('printcom_ot_cron_warm_cache')) {
+            wp_unschedule_event($ts, 'printcom_ot_cron_warm_cache');
+        }
     }
-    public function add_every5_schedule($s){ $s['every5min']=['interval'=>300,'display'=>'Every 5 Minutes']; return $s; }
+
+    public function add_every5_schedule($s) {
+        $s['every5min'] = [
+            'interval' => 300,
+            'display'  => 'Every 5 Minutes',
+        ];
+
+        return $s;
+    }
 
     /* ===== Admin menu & instellingen ===== */
 
     public function admin_menu() {
-        add_menu_page('Print.com Orders','Print.com Orders','manage_options','printcom-orders',[$this,'orders_page'],'dashicons-location',56);
-        add_submenu_page('options-general.php','Print.com Orders','Print.com Orders','manage_options','printcom-orders-settings',[$this,'settings_page']);
+        add_menu_page(
+            'Print.com Orders',
+            'Print.com Orders',
+            'manage_options',
+            'printcom-orders',
+            [$this, 'orders_page'],
+            'dashicons-location',
+            56
+        );
+
+        add_submenu_page(
+            'options-general.php',
+            'Print.com Orders',
+            'Print.com Orders',
+            'manage_options',
+            'printcom-orders-settings',
+            [$this, 'settings_page']
+        );
     }
 
     public function register_settings() {
@@ -104,6 +138,8 @@ class Printcom_Order_Tracker {
     }
 
     public function sanitize_settings($in){
+        $this->settings_cache = null;
+
         $o=[];
         $o['api_base_url']=isset($in['api_base_url'])?trim(esc_url_raw($in['api_base_url'])):'https://api.print.com';
         $o['auth_url']=isset($in['auth_url'])?trim(esc_url_raw($in['auth_url'])):'https://api.print.com/login';
@@ -2077,21 +2113,59 @@ class Printcom_Order_Tracker {
 
     /* ===== Styles ===== */
 
+    /**
+     * Laad frontend-styles enkel wanneer de relevante shortcodes aanwezig zijn.
+     */
     public function enqueue_styles() {
-        if (!is_singular()) return;
-        global $post;
-        $content = $post->post_content ?? '';
-        if (has_shortcode($content, 'print_order_status')) {
-            wp_enqueue_style('rmh-ot-style', plugins_url('assets/css/order-tracker.css', __FILE__), [], '2.4.10');
+        if (!is_singular()) {
+            return;
         }
-        if (has_shortcode($content, 'print_order_lookup')) {
-            wp_enqueue_style('rmh-order-lookup', plugins_url('assets/css/order-lookup.css', __FILE__), [], '2.1.10');
+
+        $post = get_post();
+        if (!$post instanceof \WP_Post) {
+            return;
+        }
+
+        $content = (string) $post->post_content;
+
+        if ($content !== '' && has_shortcode($content, 'print_order_status')) {
+            wp_enqueue_style(
+                'rmh-ot-style',
+                plugins_url('assets/css/order-tracker.css', __FILE__),
+                [],
+                self::PLUGIN_VERSION
+            );
+        }
+
+        if ($content !== '' && has_shortcode($content, 'print_order_lookup')) {
+            wp_enqueue_style(
+                'rmh-order-lookup',
+                plugins_url('assets/css/order-lookup.css', __FILE__),
+                [],
+                '2.1.10'
+            );
         }
     }
 
     /* ===== HTTP helpers ===== */
 
-    private function get_settings(){ return get_option(self::OPT_SETTINGS,[]); }
+    /**
+     * Haal plugin-instellingen op en cache deze gedurende de request.
+     */
+    private function get_settings(): array {
+        if (is_array($this->settings_cache)) {
+            return $this->settings_cache;
+        }
+
+        $settings = get_option(self::OPT_SETTINGS, []);
+        if (!is_array($settings)) {
+            $settings = [];
+        }
+
+        $this->settings_cache = $settings;
+
+        return $settings;
+    }
 
     /* ===== API client ===== */
 
@@ -2103,13 +2177,15 @@ class Printcom_Order_Tracker {
         $token = $this->get_access_token();
         if (is_wp_error($token)) return $token;
 
-        $args=['headers'=>[
-            'Authorization'=>'Bearer '.$token,
-            'Accept'=>'application/json',
-            'User-Agent'=>'RMH-Printcom-Tracker/1.6.1 (+WordPress)'],
-            'timeout'=>20
+        $args = [
+            'headers' => [
+                'Authorization' => 'Bearer ' . $token,
+                'Accept'        => 'application/json',
+                'User-Agent'    => self::USER_AGENT,
+            ],
+            'timeout' => 20,
         ];
-        $res=wp_remote_get($url,$args);
+        $res = wp_remote_get($url, $args);
         if (is_wp_error($res)) return $res;
 
         $code=wp_remote_retrieve_response_code($res);
@@ -2164,13 +2240,21 @@ class Printcom_Order_Tracker {
         $username=isset($s['username'])?trim($s['username']):'';
         $password=isset($s['password'])?(string)$s['password']:'';
         $password=preg_replace("/\r\n|\r|\n/","",$password);
-        $ua='RMH-Printcom-Tracker/1.6.1 (+WordPress)';
+        $ua=self::USER_AGENT;
 
         $is_print_login=(stripos($auth,'/login')!==false);
         if ($is_print_login){
             if ($username==='' || $password==='') return new WP_Error('printcom_auth_missing','Username/Password ontbreken.');
             $payload=wp_json_encode(['credentials'=>['username'=>$username,'password'=>$password]]);
-            $res=wp_remote_post($auth,['headers'=>['Accept'=>'application/json','Content-Type'=>'application/json','User-Agent'=>$ua],'body'=>$payload,'timeout'=>20]);
+            $res = wp_remote_post($auth, [
+                'headers' => [
+                    'Accept'       => 'application/json',
+                    'Content-Type' => 'application/json',
+                    'User-Agent'   => $ua,
+                ],
+                'body'    => $payload,
+                'timeout' => 20,
+            ]);
             if (is_wp_error($res)) return $res;
             $code=wp_remote_retrieve_response_code($res); $raw=wp_remote_retrieve_body($res);
             if ($code===401){
@@ -2206,7 +2290,14 @@ class Printcom_Order_Tracker {
             if (!empty($s['client_secret'])) $body['client_secret']=$s['client_secret'];
             $body['username']=$username; $body['password']=$password;
         }
-        $res=wp_remote_post($auth,['headers'=>['Accept'=>'application/json','User-Agent'=>$ua],'body'=>$body,'timeout'=>20]);
+        $res = wp_remote_post($auth, [
+            'headers' => [
+                'Accept'     => 'application/json',
+                'User-Agent' => $ua,
+            ],
+            'body'    => $body,
+            'timeout' => 20,
+        ]);
         if (is_wp_error($res)) return $res;
         $code=wp_remote_retrieve_response_code($res); $raw=wp_remote_retrieve_body($res);
         if ($code===401){
@@ -2395,13 +2486,25 @@ add_action('admin_post_rmh_in_test_invoice_lookup', function(){
 add_action('admin_post_printcom_ot_test_connection', function(){
     if(!current_user_can('manage_options')) wp_die('Unauthorized');
     if(empty($_POST['printcom_ot_test_conn_nonce']) || !wp_verify_nonce($_POST['printcom_ot_test_conn_nonce'],'printcom_ot_test_conn')) wp_die('Nonce invalid');
-    $s=get_option(Printcom_Order_Tracker::OPT_SETTINGS,[]);
-    $auth=$s['auth_url']??''; $u=trim($s['username']??''); $p=preg_replace("/\r\n|\r|\n/","",(string)($s['password']??'')); $ua='RMH-Printcom-Tracker/1.6.1 (+WordPress)';
+    $s    = get_option(Printcom_Order_Tracker::OPT_SETTINGS, []);
+    $auth = $s['auth_url'] ?? '';
+    $u    = trim($s['username'] ?? '');
+    $p    = preg_replace("/\r\n|\r|\n/", '', (string) ($s['password'] ?? ''));
+    $ua   = Printcom_Order_Tracker::USER_AGENT;
+
     if(!$auth||!$u||!$p){ $msg='❌ Ontbrekende instellingen (auth_url/username/password).'; }
     else{
-        $payload=wp_json_encode(['credentials'=>['username'=>$u,'password'=>$p]]);
-        $args=['headers'=>['Accept'=>'application/json','Content-Type'=>'application/json','User-Agent'=>$ua],'body'=>$payload,'timeout'=>20];
-        $res=wp_remote_post($auth,$args);
+        $payload = wp_json_encode(['credentials' => ['username' => $u, 'password' => $p]]);
+        $args    = [
+            'headers' => [
+                'Accept'       => 'application/json',
+                'Content-Type' => 'application/json',
+                'User-Agent'   => $ua,
+            ],
+            'body'    => $payload,
+            'timeout' => 20,
+        ];
+        $res = wp_remote_post($auth, $args);
         if(is_wp_error($res)) $msg='❌ Verbindingsfout: '.$res->get_error_message();
         else { $code=wp_remote_retrieve_response_code($res); $raw=wp_remote_retrieve_body($res); $msg=($code>=200&&$code<300)?'✅ OK ('.$code.'). Body lengte: '.strlen($raw).'.':'❌ Auth fout ('.$code.'). '.(!empty($raw)?'Body: '.sanitize_text_field($raw):'Geen body.'); }
     }
@@ -2419,7 +2522,14 @@ add_action('admin_post_printcom_ot_test_order', function(){
     else{
         $prefix=substr($token,0,16); $len=strlen($token);
         $s=get_option(Printcom_Order_Tracker::OPT_SETTINGS,[]); $base=rtrim($s['api_base_url']??'https://api.print.com','/'); $url=$base.'/orders/'.rawurlencode($order);
-        $res=wp_remote_get($url,['headers'=>['Authorization'=>'Bearer '.$token,'Accept'=>'application/json','User-Agent'=>'RMH-Printcom-Tracker/1.6.1 (+WordPress)'],'timeout'=>20]);
+        $res = wp_remote_get($url, [
+            'headers' => [
+                'Authorization' => 'Bearer ' . $token,
+                'Accept'        => 'application/json',
+                'User-Agent'    => Printcom_Order_Tracker::USER_AGENT,
+            ],
+            'timeout' => 20,
+        ]);
         if(is_wp_error($res)){ $msg='❌ Transportfout: '.esc_html($res->get_error_message()); }
         else{ $code=wp_remote_retrieve_response_code($res); $raw=wp_remote_retrieve_body($res); $hdrs=wp_remote_retrieve_headers($res); $body_preview=$raw?mb_substr($raw,0,260):''; $hints=[]; foreach(['www-authenticate','x-request-id','server'] as $h) if(!empty($hdrs[$h])) $hints[]=strtoupper($h).': '.$hdrs[$h];
             $msg='🔎 Token: len='.$len.', starts="'.esc_html($prefix).'" | ';
