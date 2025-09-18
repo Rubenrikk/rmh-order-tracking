@@ -128,14 +128,13 @@
   .rmh-invoice-card__badge:focus-visible{outline:3px solid #24325F;outline-offset:2px}
   .rmh-invoice-card__meta{margin-top:0;gap:16px;font-size:.95rem}
   .rmh-invoice-card__meta-item{display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding-bottom:12px;border-bottom:1px solid rgba(36,50,95,.08)}
-  .rmh-invoice-card__meta-item:last-child{border:2px solid #F3B4B4}
   .rmh-invoice-card__meta-label{color:#5d6673;font-size:.85rem;font-weight:600;letter-spacing:.01em}
   .rmh-invoice-card__meta-item span:last-child{color:#232323;font-weight:600;font-size:1rem}
   .rmh-invoice-card__meta-item--date{gap:4px;padding-bottom:10px}
   .rmh-invoice-card__meta-item--date span:last-child{font-weight:600;font-size:.98rem}
   .rmh-invoice-card__meta-item--amount-subtle span:last-child{font-weight:500;font-size:.94rem;color:#4f5560}
   .rmh-invoice-card__meta-item--amount-base span:last-child{font-size:1.04rem}
-  .rmh-invoice-card__meta-item--amount-highlight{order:-1;align-self:stretch;width:100%;background:#FFF9F8;border:2px solid #F3B4B4;border-radius:18px;padding:18px 20px;box-shadow:0 14px 26px rgba(183,28,28,.14);border-bottom:none;gap:0px}
+  .rmh-invoice-card__meta-item--amount-highlight{order:-1;align-self:stretch;width:100%;background:#FFF9F8;border:2px solid #F3B4B4;border-radius:18px;padding:18px 20px;box-shadow:0 14px 26px rgba(183,28,28,.14);gap:0px}
   .rmh-invoice-card__meta-item--amount-highlight .rmh-invoice-card__meta-label{color:#B71C1C;font-size:.92rem}
   .rmh-invoice-card__meta-item--amount-highlight span:last-child{color:#B71C1C;font-size:1.32rem;font-weight:700}
   .rmh-invoice-card__footer{margin-top:28px}
