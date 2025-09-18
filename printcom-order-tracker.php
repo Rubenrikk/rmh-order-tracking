@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     2.4.8
+ * Version:     2.4.9
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -645,12 +645,15 @@ class Printcom_Order_Tracker {
         }
         $overall_status = $this->determine_overall_order_status($data);
 
-        $intro_progress_text = $this->build_intro_summary($product_count, $overall_status, $data, $invoice_display_details);
+        $desktop_intro_text = $this->build_intro_summary($product_count, $overall_status, $data, $invoice_display_details);
+        $mobile_intro_text = $this->build_mobile_intro_summary($product_count, $overall_status, $data, $invoice_display_details);
 
         $summary_fragments = [];
-        if ($intro_progress_text !== '') {
-            $summary_fragments[] = '<span class="rmh-ot__summary-text rmh-ot__summary-text--desktop">' . $intro_progress_text . '</span>';
-            $summary_fragments[] = '<span class="rmh-ot__summary-text rmh-ot__summary-text--mobile">' . $intro_progress_text . '</span>';
+        if ($desktop_intro_text !== '') {
+            $summary_fragments[] = '<span class="rmh-ot__summary-text rmh-ot__summary-text--desktop">' . $desktop_intro_text . '</span>';
+        }
+        if ($mobile_intro_text !== '') {
+            $summary_fragments[] = '<span class="rmh-ot__summary-text rmh-ot__summary-text--mobile">' . $mobile_intro_text . '</span>';
         }
 
         $progress_text_html = implode('', $summary_fragments);
@@ -984,7 +987,38 @@ class Printcom_Order_Tracker {
         return implode(' ', $sentences);
     }
 
+    private function build_mobile_intro_summary(int $product_count, string $overall_status, array $order_data, ?array $invoice_details): string {
+        $count_display = esc_html(number_format_i18n($product_count));
+        $product_label = esc_html($product_count === 1 ? 'product' : 'producten');
+        $status_phrase = $this->determine_order_status_phrase($overall_status, $order_data);
+
+        if ($status_phrase === '') {
+            $status_phrase = 'in behandeling';
+        }
+
+        $first_sentence = sprintf(
+            'Je bestelling bevat <span class="rmh-order-progress__count rmh-ot__summary-count">%s</span> %s en is <span class="rmh-order-progress__status rmh-ot__summary-status">%s</span>.',
+            $count_display,
+            $product_label,
+            esc_html($status_phrase)
+        );
+
+        $invoice_sentence = $this->build_mobile_invoice_sentence($invoice_details);
+
+        return trim($first_sentence . ' ' . $invoice_sentence);
+    }
+
     private function build_order_status_sentence(string $overall_status, array $order_data): string {
+        $status_phrase = $this->determine_order_status_phrase($overall_status, $order_data);
+
+        if ($status_phrase === '') {
+            $status_phrase = 'in behandeling';
+        }
+
+        return 'Je bestelling is <span class="rmh-order-progress__status rmh-ot__summary-status">' . esc_html($status_phrase) . '</span>.';
+    }
+
+    private function determine_order_status_phrase(string $overall_status, array $order_data): string {
         $candidate_statuses = [];
         foreach (['order_status', 'orderStatus', 'status', 'statusCode', 'orderStatusCode'] as $status_key) {
             if (!empty($order_data[$status_key]) && is_string($order_data[$status_key])) {
@@ -1039,7 +1073,7 @@ class Printcom_Order_Tracker {
             $status_phrase = 'in behandeling';
         }
 
-        return 'Je bestelling is <span class="rmh-order-progress__status rmh-ot__summary-status">' . esc_html($status_phrase) . '</span>.';
+        return $status_phrase;
     }
 
     private function build_invoice_sentence(?array $invoice_details): string {
@@ -1070,6 +1104,39 @@ class Printcom_Order_Tracker {
 
         if ($is_overdue === true) {
             return 'De factuur staat open en is vervallen. Je kunt hieronder direct betalen.';
+        }
+
+        return 'Hieronder vind je het overzicht van je factuur en bestelling.';
+    }
+
+    private function build_mobile_invoice_sentence(?array $invoice_details): string {
+        if (!is_array($invoice_details) || !$invoice_details) {
+            return 'Hieronder vind je het overzicht van je factuur en bestelling.';
+        }
+
+        $is_paid = $this->invoice_details_is_paid($invoice_details);
+        $is_partially_paid = $this->get_invoice_detail_flag($invoice_details, 'is_partially_paid');
+        $is_overdue = $this->get_invoice_detail_flag($invoice_details, 'is_overdue');
+
+        if ($is_paid === true) {
+            return 'De factuur is volledig betaald. Hieronder vind je het overzicht van je factuur en bestelling.';
+        }
+
+        if ($is_partially_paid === true) {
+            return 'De factuur is deels betaald; het resterende bedrag kun je hieronder voldoen.';
+        }
+
+        $invoice_open = ($is_paid === false || $is_paid === null);
+        if ($invoice_open && $is_overdue === true) {
+            return 'De factuur staat open en is vervallen; je kunt het bedrag hieronder direct voldoen.';
+        }
+
+        if ($invoice_open) {
+            return 'De factuur staat nog open en kan hieronder direct betaald worden.';
+        }
+
+        if ($is_overdue === true) {
+            return 'De factuur staat open en is vervallen; je kunt het bedrag hieronder direct voldoen.';
         }
 
         return 'Hieronder vind je het overzicht van je factuur en bestelling.';
@@ -2015,7 +2082,7 @@ class Printcom_Order_Tracker {
         global $post;
         $content = $post->post_content ?? '';
         if (has_shortcode($content, 'print_order_status')) {
-            wp_enqueue_style('rmh-ot-style', plugins_url('assets/css/order-tracker.css', __FILE__), [], '2.4.8');
+            wp_enqueue_style('rmh-ot-style', plugins_url('assets/css/order-tracker.css', __FILE__), [], '2.4.9');
         }
         if (has_shortcode($content, 'print_order_lookup')) {
             wp_enqueue_style('rmh-order-lookup', plugins_url('assets/css/order-lookup.css', __FILE__), [], '2.1.4');
