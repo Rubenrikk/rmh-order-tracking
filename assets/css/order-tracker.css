@@ -93,6 +93,14 @@
 .rmh-invoice-card__badge-text-desktop,.rmh-invoice-card__badge-text-mobile{display:inline-flex;align-items:center;line-height:1}
 .rmh-invoice-card__badge-text-desktop{display:none}
 .rmh-invoice-card__badge-text-mobile{display:inline-flex}
+.rmh-invoice-card__status-region{flex-basis:100%;display:flex;align-items:flex-start;margin-top:4px}
+.rmh-invoice-card__status{display:flex;align-items:center;gap:12px;padding:14px 18px;border-radius:16px;border:1px solid rgba(229,57,53,.24);background:#fdf0ed;color:#B71C1C;box-shadow:0 6px 16px rgba(36,50,95,.12);font-weight:600;font-size:.95rem;line-height:1.35;letter-spacing:.01em;width:100%;text-align:left}
+.rmh-invoice-card__status-icon{width:22px;height:22px;border-radius:999px;flex-shrink:0;background-color:#E53935;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24'%3E%3Cpath stroke='%23fff' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M12 7h.01M12 11v6'/%3E%3Ccircle cx='12' cy='12' r='9' stroke='%23fff' stroke-width='2'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:center;background-size:12px;box-shadow:0 4px 10px rgba(229,57,53,.18)}
+.rmh-invoice-card__status-text{display:inline-flex;align-items:flex-start}
+.rmh-invoice-card__status--paid{background:#e6f4ea;border-color:rgba(46,125,50,.26);color:#2E7D32;box-shadow:0 6px 16px rgba(36,50,95,.1)}
+.rmh-invoice-card__status--paid .rmh-invoice-card__status-icon{background-color:#2E7D32;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24'%3E%3Cpath stroke='%23fff' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='m5 13 4 4L19 7'/%3E%3C/svg%3E");box-shadow:0 4px 10px rgba(46,125,50,.18)}
+.rmh-invoice-card__status--partial{background:#fff4e6;border-color:rgba(242,160,61,.28);color:#C77800;box-shadow:0 6px 16px rgba(199,120,0,.12)}
+.rmh-invoice-card__status--partial .rmh-invoice-card__status-icon{background-color:#F2A03D;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24'%3E%3Cpath stroke='%23fff' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M12 7h.01M12 11v6'/%3E%3Ccircle cx='12' cy='12' r='9' stroke='%23fff' stroke-width='2'/%3E%3C/svg%3E");box-shadow:0 4px 10px rgba(242,160,61,.18)}
 .rmh-invoice-card__badge--open{background:#E53935;border-color:#C62828}
 .rmh-invoice-card__badge--paid{background:#2E7D32;border-color:#205622}
 .rmh-invoice-card__badge--partial{background:#F2A03D;border-color:#C77800;color:#2f2100;box-shadow:0 6px 16px rgba(199,120,0,.18)}
@@ -106,12 +114,14 @@
 .rmh-invoice-card__balance--notice::before{content:"";display:inline-flex;width:34px;height:34px;border-radius:50%;background-color:#E53935;background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24'%3E%3Cpath stroke='%23fff' stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M12 7h.01M12 11v6'/%3E%3Ccircle cx='12' cy='12' r='9' stroke='%23fff' stroke-width='2'/%3E%3C/svg%3E");background-repeat:no-repeat;background-position:center;background-size:16px;box-shadow:0 6px 14px rgba(229,57,53,.2);flex-shrink:0}
 .rmh-invoice-card__balance-message{font-size:1rem;font-weight:600;letter-spacing:.01em;color:#B71C1C}
 .rmh-invoice-card__meta{display:grid;grid-template-columns:minmax(0,1fr);row-gap:24px;font-size:.95rem;color:#232323}
-.rmh-invoice-card__meta-column{display:flex;flex-direction:column;gap:18px}
 .rmh-invoice-card__meta-item{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:24px;row-gap:8px;align-items:end}
 .rmh-invoice-card__meta-label{color:rgba(35,35,35,.68);font-size:.78rem;font-weight:600;letter-spacing:.05em;text-transform:uppercase;text-align:left}
 .rmh-invoice-card__meta-value{color:#232323;font-weight:700;font-size:1.04rem;text-align:right;font-variant-numeric:tabular-nums;justify-self:end}
 .rmh-invoice-card__meta-item--amount-subtle .rmh-invoice-card__meta-value{font-weight:600;font-size:1rem;color:rgba(35,35,35,.8)}
+.rmh-invoice-card__meta-item--amount-total .rmh-invoice-card__meta-value{font-size:1.18rem;font-weight:700}
 .rmh-invoice-card__meta-item--amount-base .rmh-invoice-card__meta-value{font-size:1.24rem;font-weight:700}
+[data-invoice-status="paid"] .rmh-invoice-card__meta-item--amount-total .rmh-invoice-card__meta-value{color:#2E7D32}
+[data-invoice-status="open"] .rmh-invoice-card__meta-item--amount-total .rmh-invoice-card__meta-value,[data-invoice-status="partial"] .rmh-invoice-card__meta-item--amount-total .rmh-invoice-card__meta-value{color:#232323}
 [data-invoice-status="open"] .rmh-invoice-card__meta-item--amount-base .rmh-invoice-card__meta-value{font-size:1.08rem;font-weight:600;color:rgba(35,35,35,.82)}
 [data-invoice-status="partial"] .rmh-invoice-card__meta-item--amount-base .rmh-invoice-card__meta-value{color:#8c4a0e}
 [data-invoice-status="partial"] .rmh-invoice-card__balance{background:#FFF3E0;border-color:rgba(199,120,0,.32);color:#8c4a0e;box-shadow:0 8px 18px rgba(199,120,0,.16)}
@@ -145,23 +155,23 @@
 
 @media(max-width:600px){
   .rmh-invoice-card{margin:0 12px 18px;padding:24px 22px 28px;border-radius:20px;gap:24px}
-  .rmh-invoice-card__header{display:grid;grid-template-columns:minmax(0,1fr) auto;grid-template-areas:"title badge";align-items:start;column-gap:12px;row-gap:12px;padding:10px 0 14px}
-  .rmh-invoice-card__title{grid-area:title;font-size:1.08rem;line-height:1.35;text-align:left}
-  .rmh-invoice-card__badge{grid-area:badge;justify-self:end;align-self:start;margin:0;min-height:40px;padding:8px 20px;font-size:.82rem;white-space:nowrap}
+  .rmh-invoice-card__header{display:flex;flex-direction:column;align-items:center;gap:14px;padding:8px 0 12px;text-align:center}
+  .rmh-invoice-card__title{font-size:1.12rem;line-height:1.4;text-align:center;width:100%}
+  .rmh-invoice-card__badge{display:none}
+  .rmh-invoice-card__status-region{width:100%}
+  .rmh-invoice-card__status{padding:14px 16px;box-shadow:0 4px 12px rgba(36,50,95,.12)}
+  .rmh-invoice-card__status-icon{width:20px;height:20px;background-size:11px;box-shadow:0 3px 8px rgba(229,57,53,.16)}
+  .rmh-invoice-card__status--paid .rmh-invoice-card__status-icon{box-shadow:0 3px 8px rgba(46,125,50,.16)}
+  .rmh-invoice-card__status--partial .rmh-invoice-card__status-icon{box-shadow:0 3px 8px rgba(242,160,61,.16)}
+  .rmh-invoice-card__status-text{font-size:.94rem;line-height:1.4}
   .rmh-invoice-card__body{gap:22px}
-  .rmh-invoice-card__balance{padding:16px 18px;border-radius:16px;font-size:1rem;gap:12px;box-shadow:0 8px 14px rgba(229,57,53,.16)}
-  .rmh-invoice-card__balance-amount{display:none}
-  .rmh-invoice-card__balance--notice{align-items:flex-start}
-  .rmh-invoice-card__balance--notice::before{width:22px;height:22px;background-size:12px;box-shadow:0 4px 10px rgba(229,57,53,.16);margin-top:2px}
-  .rmh-invoice-card__balance-message{font-size:.96rem;line-height:1.4;letter-spacing:.01em}
-  .rmh-invoice-card__meta{grid-template-columns:minmax(0,1fr);row-gap:18px}
-  .rmh-invoice-card__meta-column{gap:14px}
-  .rmh-invoice-card__meta-item{grid-template-columns:minmax(0,1fr);row-gap:6px;align-items:flex-start}
-  .rmh-invoice-card__meta-label,.rmh-invoice-card__meta-value{display:block}
-  .rmh-invoice-card__meta-label{font-size:.75rem;letter-spacing:.08em;text-transform:uppercase;color:rgba(35,35,35,.7);line-height:1.2}
-  .rmh-invoice-card__meta-value{font-size:1.02rem;font-weight:600;color:#232323;text-align:left;letter-spacing:normal;text-transform:none;line-height:1.45}
-  .rmh-invoice-card__meta-item--amount-subtle .rmh-invoice-card__meta-value{font-size:1.02rem}
-  .rmh-invoice-card__meta-item--amount-base{display:none}
+  .rmh-invoice-card__meta{display:flex;flex-direction:column;gap:18px}
+  .rmh-invoice-card__meta-item{display:flex;flex-direction:column;align-items:flex-start;gap:6px;padding-bottom:0}
+  .rmh-invoice-card__meta-label{font-size:.75rem;letter-spacing:.08em;text-transform:uppercase;color:rgba(35,35,35,.68);line-height:1.2}
+  .rmh-invoice-card__meta-value{font-size:1.04rem;font-weight:700;color:#232323;text-align:left;letter-spacing:normal;text-transform:none;line-height:1.45;width:100%}
+  .rmh-invoice-card__meta-item--amount-subtle .rmh-invoice-card__meta-value{font-size:1.02rem;font-weight:600;color:rgba(35,35,35,.82)}
+  .rmh-invoice-card__meta-item--amount-total{display:flex;font-size:1.08rem}
+  .rmh-invoice-card__meta-item--amount-total .rmh-invoice-card__meta-value{font-size:1.12rem;font-weight:700}
   .rmh-invoice-card__footer{flex-direction:column;align-items:stretch;gap:22px;margin-top:0;padding-top:20px}
   .rmh-invoice-card__footer-summary{grid-template-columns:1fr;row-gap:6px;font-size:1.14rem}
   .rmh-invoice-card__footer-label{font-size:.94rem;text-align:left}
@@ -182,7 +192,6 @@
   .rmh-invoice-card__badge-text-desktop{display:inline-flex}
   .rmh-invoice-card__badge-text-mobile{display:none}
   .rmh-invoice-card__meta{grid-template-columns:repeat(2,minmax(0,1fr));column-gap:56px;row-gap:0;align-items:start}
-  .rmh-invoice-card__meta-column{gap:20px}
   .rmh-invoice-card__meta-item{row-gap:6px}
   .rmh-invoice-card__footer{margin-top:4px}
   .rmh-invoice-card__footer-action{margin-left:0}
