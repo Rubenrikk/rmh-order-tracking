@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     2.4.16
+ * Version:     2.4.17
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -13,7 +13,7 @@ if (!defined('ABSPATH')) exit;
 require_once plugin_dir_path(__FILE__) . 'includes/class-rmh-invoice-ninja-client.php';
 
 class Printcom_Order_Tracker {
-    public const PLUGIN_VERSION = '2.4.16';
+    public const PLUGIN_VERSION = '2.4.17';
     public const USER_AGENT     = 'RMH-Printcom-Tracker/1.6.1 (+WordPress)';
 
     const OPT_SETTINGS     = 'printcom_ot_settings';
@@ -707,7 +707,10 @@ class Printcom_Order_Tracker {
                     ? 'Bekijk factuur (opent in een nieuw tabblad)'
                     : 'Bekijk en betaal factuur (opent in een nieuw tabblad)';
 
-                $invoice_cta_button_html = '<a class="btn btn--track" target="_blank" rel="nofollow noopener" href="' . esc_url($invoice_portal_link) . '" aria-label="' . esc_attr($button_aria_label) . '">' . esc_html($button_text) . '</a>';
+                $cta_classes = ['btn', 'rmh-invoice-card__cta'];
+                $cta_classes[] = ($invoice_is_paid_flag === true) ? 'rmh-invoice-card__cta--view' : 'rmh-invoice-card__cta--pay';
+
+                $invoice_cta_button_html = '<a class="' . esc_attr(implode(' ', $cta_classes)) . '" target="_blank" rel="nofollow noopener" href="' . esc_url($invoice_portal_link) . '" aria-label="' . esc_attr($button_aria_label) . '">' . esc_html($button_text) . '</a>';
             }
 
             $invoice_info_html = $this->render_invoice_information_block($invoice_display_details, $invoice_cta_button_html);
@@ -891,9 +894,8 @@ class Printcom_Order_Tracker {
         $badge_classes[] = ($is_paid === true) ? 'rmh-invoice-card__badge--paid' : 'rmh-invoice-card__badge--open';
 
         $desktop_badge_text = ($is_paid === true) ? 'Betaald' : 'Openstaand';
-        $mobile_badge_text = '';
+        $mobile_badge_text = $desktop_badge_text;
         $badge_aria_label = $desktop_badge_text;
-        $hide_mobile_badge = false;
 
         if ($is_paid === true) {
             $mobile_badge_text = 'Betaald';
@@ -902,12 +904,6 @@ class Printcom_Order_Tracker {
             $mobile_badge_text = 'Deels betaald';
             $badge_classes[] = 'rmh-invoice-card__badge--partial';
             $badge_aria_label = $mobile_badge_text;
-        } else {
-            $hide_mobile_badge = true;
-        }
-
-        if ($hide_mobile_badge === true) {
-            $badge_classes[] = 'rmh-invoice-card__badge--mobile-hidden';
         }
 
         $badge_inner_html = '<span class="rmh-invoice-card__badge-text-desktop">' . esc_html($desktop_badge_text) . '</span>';
@@ -931,12 +927,12 @@ class Printcom_Order_Tracker {
         $balance_value = $details['balance'] ?? null;
         $balance_display = $this->format_invoice_amount($balance_value, $currency);
 
-        $meta_rows = [];
+        $meta_columns = [
+            'left' => [],
+            'right' => [],
+        ];
         if ($date_display) {
-            $meta_rows[] = ['label' => 'Factuurdatum', 'value' => $date_display, 'modifier' => 'date'];
-        }
-        if ($due_date_display) {
-            $meta_rows[] = ['label' => 'Vervaldatum', 'value' => $due_date_display, 'modifier' => 'date'];
+            $meta_columns['left'][] = ['label' => 'Factuurdatum', 'value' => $date_display, 'modifier' => 'date'];
         }
         $excl_total_display = $subtotal_display;
         if ($excl_total_display === null && $total_value !== null && $tax_value !== null) {
@@ -946,10 +942,13 @@ class Printcom_Order_Tracker {
             $excl_total_display = $total_display;
         }
         if ($excl_total_display !== null) {
-            $meta_rows[] = ['label' => 'Totaal (excl. btw)', 'value' => $excl_total_display, 'modifier' => 'amount-subtle'];
+            $meta_columns['left'][] = ['label' => 'Totaal (excl. btw)', 'value' => $excl_total_display, 'modifier' => 'amount-subtle'];
+        }
+        if ($due_date_display) {
+            $meta_columns['right'][] = ['label' => 'Vervaldatum', 'value' => $due_date_display, 'modifier' => 'date'];
         }
         if ($total_display) {
-            $meta_rows[] = ['label' => 'Totaal (incl. btw)', 'value' => $total_display, 'modifier' => 'amount-base'];
+            $meta_columns['right'][] = ['label' => 'Totaal (incl. btw)', 'value' => $total_display, 'modifier' => 'amount-base'];
         }
         $show_balance = false;
         if ($balance_value !== null) {
@@ -961,32 +960,66 @@ class Printcom_Order_Tracker {
             }
         }
         $meta_html = '';
+        $balance_html = '';
         if ($show_balance && $balance_display) {
-            $meta_rows[] = ['label' => 'Openstaand', 'value' => $balance_display, 'modifier' => 'amount-highlight'];
+            $balance_html = '<div class="rmh-invoice-card__balance"><span class="rmh-invoice-card__balance-label">Openstaand:</span><span class="rmh-invoice-card__balance-amount">' . esc_html($balance_display) . '</span></div>';
         }
 
-        if ($meta_rows) {
+        if ($meta_columns['left'] || $meta_columns['right']) {
             $meta_html .= '<div class="rmh-invoice-card__meta">';
-            foreach ($meta_rows as $row) {
-                $classes = ['rmh-invoice-card__meta-item'];
-                if (!empty($row['modifier'])) {
-                    $classes[] = 'rmh-invoice-card__meta-item--' . preg_replace('/[^a-z0-9_-]/i', '', (string) $row['modifier']);
+            foreach (['left', 'right'] as $column_key) {
+                $column_rows = $meta_columns[$column_key];
+                if (!$column_rows) {
+                    continue;
                 }
-                $meta_html .= '<div class="' . esc_attr(implode(' ', $classes)) . '"><span class="rmh-invoice-card__meta-label">' . esc_html($row['label']) . ':</span><span>' . esc_html($row['value']) . '</span></div>';
+                $meta_html .= '<div class="rmh-invoice-card__meta-column rmh-invoice-card__meta-column--' . esc_attr($column_key) . '">';
+                foreach ($column_rows as $row) {
+                    $classes = ['rmh-invoice-card__meta-item'];
+                    if (!empty($row['modifier'])) {
+                        $classes[] = 'rmh-invoice-card__meta-item--' . preg_replace('/[^a-z0-9_-]/i', '', (string) $row['modifier']);
+                    }
+                    $meta_html .= '<div class="' . esc_attr(implode(' ', $classes)) . '"><span class="rmh-invoice-card__meta-label">' . esc_html($row['label']) . ':</span><span class="rmh-invoice-card__meta-value">' . esc_html($row['value']) . '</span></div>';
+                }
+                $meta_html .= '</div>';
             }
             $meta_html .= '</div>';
         }
 
+        $footer_summary_html = '';
+        if ($show_balance && $balance_display) {
+            $footer_summary_html = '<div class="rmh-invoice-card__footer-summary"><span class="rmh-invoice-card__footer-label">Openstaand:</span><span class="rmh-invoice-card__footer-amount">' . esc_html($balance_display) . '</span></div>';
+        } elseif ($total_display) {
+            $footer_summary_html = '<div class="rmh-invoice-card__footer-summary"><span class="rmh-invoice-card__footer-label">Totaal (incl. btw):</span><span class="rmh-invoice-card__footer-amount">' . esc_html($total_display) . '</span></div>';
+        }
+
+        $card_status = 'open';
+        if ($is_paid === true) {
+            $card_status = 'paid';
+        } elseif ($is_partially_paid === true) {
+            $card_status = 'partial';
+        }
+
         $html  = '<div class="rmh-ot__items rmh-ot__items--invoice">';
         $html .=   '<h3>Overzicht van je factuur</h3>';
-        $html .=   '<section class="rmh-invoice-card" aria-label="Factuurinformatie">';
+        $html .=   '<section class="rmh-invoice-card" aria-label="Factuurinformatie" data-invoice-status="' . esc_attr($card_status) . '">';
         $html .=   '<div class="rmh-invoice-card__header">';
         $html .=     '<h3 class="rmh-invoice-card__title">' . esc_html($title) . '</h3>';
         $html .=     '<span class="' . esc_attr(implode(' ', $badge_classes)) . '" aria-label="' . esc_attr($badge_aria_label) . '">' . $badge_inner_html . '</span>';
         $html .=   '</div>';
-        $html .= $meta_html;
-        if ($cta_button_html !== '') {
-            $html .=   '<div class="rmh-invoice-card__footer">' . $cta_button_html . '</div>';
+        $body_html = $balance_html . $meta_html;
+        if ($body_html !== '') {
+            $html .=   '<div class="rmh-invoice-card__body">' . $body_html . '</div>';
+        }
+        $footer_has_content = ($footer_summary_html !== '' || $cta_button_html !== '');
+        if ($footer_has_content) {
+            $html .=   '<div class="rmh-invoice-card__footer">';
+            if ($footer_summary_html !== '') {
+                $html .= $footer_summary_html;
+            }
+            if ($cta_button_html !== '') {
+                $html .= '<div class="rmh-invoice-card__footer-action">' . $cta_button_html . '</div>';
+            }
+            $html .=   '</div>';
         }
         $html .=   '</section>';
         $html .= '</div>';
