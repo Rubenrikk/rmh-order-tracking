@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     2.4.17
+ * Version:     2.4.18
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -13,7 +13,7 @@ if (!defined('ABSPATH')) exit;
 require_once plugin_dir_path(__FILE__) . 'includes/class-rmh-invoice-ninja-client.php';
 
 class Printcom_Order_Tracker {
-    public const PLUGIN_VERSION = '2.4.17';
+    public const PLUGIN_VERSION = '2.4.18';
     public const USER_AGENT     = 'RMH-Printcom-Tracker/1.6.1 (+WordPress)';
 
     const OPT_SETTINGS     = 'printcom_ot_settings';
@@ -947,9 +947,7 @@ class Printcom_Order_Tracker {
         if ($due_date_display) {
             $meta_columns['right'][] = ['label' => 'Vervaldatum', 'value' => $due_date_display, 'modifier' => 'date'];
         }
-        if ($total_display) {
-            $meta_columns['right'][] = ['label' => 'Totaal (incl. btw)', 'value' => $total_display, 'modifier' => 'amount-base'];
-        }
+        // Detailsectie toont enkel het bedrag exclusief btw; inclusief bedrag verhuist naar de footer.
         $show_balance = false;
         if ($balance_value !== null) {
             $numeric_balance = (float) $balance_value;
@@ -961,8 +959,17 @@ class Printcom_Order_Tracker {
         }
         $meta_html = '';
         $balance_html = '';
-        if ($show_balance && $balance_display) {
-            $balance_html = '<div class="rmh-invoice-card__balance"><span class="rmh-invoice-card__balance-label">Openstaand:</span><span class="rmh-invoice-card__balance-amount">' . esc_html($balance_display) . '</span></div>';
+        if ($show_balance) {
+            $balance_message = '';
+            if ($is_partially_paid === true) {
+                $balance_message = 'Factuur gedeeltelijk betaald';
+            } elseif ($is_paid === false) {
+                $balance_message = 'Factuur openstaand';
+            }
+
+            if ($balance_message !== '') {
+                $balance_html = '<div class="rmh-invoice-card__balance rmh-invoice-card__balance--notice"><span class="rmh-invoice-card__balance-message">' . esc_html($balance_message) . '</span></div>';
+            }
         }
 
         if ($meta_columns['left'] || $meta_columns['right']) {
