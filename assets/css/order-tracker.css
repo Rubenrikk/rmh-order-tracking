@@ -133,7 +133,7 @@
   .rmh-invoice-card__badge--mobile-hidden{display:inline-flex}
   .rmh-invoice-card__badge:focus-visible{outline-offset:3px}
   .rmh-invoice-card__meta{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:18px 24px}
-  .rmh-invoice-card__meta-item{padding-bottom:0;border-bottom:0;gap:8px}
+  .rmh-invoice-card__meta-item{padding-bottom:0;gap:8px}
   .rmh-invoice-card__meta-item--amount-highlight{order:0;grid-column:1/-1;padding:20px 24px;border-radius:22px}
   .rmh-invoice-card__meta-item--amount-highlight .rmh-invoice-card__meta-label{font-size:.95rem}
   .rmh-invoice-card__meta-item--amount-highlight span:last-child{font-size:1.4rem}
