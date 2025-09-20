@@ -521,6 +521,7 @@ class RMH_InvoiceNinja_Client {
         $currency       = $this->extract_currency_code_from_invoice( $invoice );
         $status         = $this->extract_string_value( $invoice, [ 'status', 'invoice_status', 'status_label' ] );
         $paid_to_date   = $this->extract_numeric_value( $invoice, [ 'paid_to_date', 'paidToDate', 'paid_amount' ] );
+        $custom_value_1 = $this->extract_string_value( $invoice, [ 'custom_value1', 'customValue1' ] );
 
         return [
             'link'              => $link,
@@ -536,6 +537,7 @@ class RMH_InvoiceNinja_Client {
             'invoice_status'    => $status,
             'is_partially_paid' => $this->determine_invoice_partially_paid_state( $status, $total, $balance, $paid_to_date ),
             'is_overdue'        => $this->determine_invoice_overdue_state( $status, $due_date, $balance ),
+            'custom_value1'     => $custom_value_1,
         ];
     }
 
@@ -569,6 +571,7 @@ class RMH_InvoiceNinja_Client {
             'invoice_status'    => null,
             'is_partially_paid' => null,
             'is_overdue'        => null,
+            'custom_value1'     => null,
         ];
 
         if ( array_key_exists( 'is_paid', $details ) ) {
@@ -589,7 +592,7 @@ class RMH_InvoiceNinja_Client {
             }
         }
 
-        foreach ( [ 'invoice_number', 'invoice_date', 'due_date', 'currency', 'invoice_status' ] as $string_key ) {
+        foreach ( [ 'invoice_number', 'invoice_date', 'due_date', 'currency', 'invoice_status', 'custom_value1' ] as $string_key ) {
             if ( isset( $details[ $string_key ] ) && is_string( $details[ $string_key ] ) ) {
                 $value = trim( $details[ $string_key ] );
                 if ( $value !== '' ) {

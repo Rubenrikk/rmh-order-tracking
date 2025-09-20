@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     2.4.22
+ * Version:     2.4.23
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -13,7 +13,7 @@ if (!defined('ABSPATH')) exit;
 require_once plugin_dir_path(__FILE__) . 'includes/class-rmh-invoice-ninja-client.php';
 
 class Printcom_Order_Tracker {
-    public const PLUGIN_VERSION = '2.4.22';
+    public const PLUGIN_VERSION = '2.4.23';
     public const USER_AGENT     = 'RMH-Printcom-Tracker/1.6.1 (+WordPress)';
 
     const OPT_SETTINGS     = 'printcom_ot_settings';
@@ -263,17 +263,44 @@ class Printcom_Order_Tracker {
         }
 
         $msg='';
-        if (!empty($_POST['rmh_ot_my_order']) && !empty($_POST['rmh_ot_print_order']) && check_admin_referer('printcom_ot_new_order_action','printcom_ot_nonce')) {
+        $error_msg='';
+        if (!empty($_POST['rmh_ot_my_order']) && check_admin_referer('printcom_ot_new_order_action','printcom_ot_nonce')) {
             $my=sanitize_text_field($_POST['rmh_ot_my_order']);
-            $print=sanitize_text_field($_POST['rmh_ot_print_order']);
             $invoice='';
             if (isset($_POST['rmh_ot_invoice_number'])) {
                 $invoice=sanitize_text_field($_POST['rmh_ot_invoice_number']);
             }
-            if ($my!=='' && $print!=='') {
-                $res=$this->create_or_update_page_for_order($my,$print,$invoice);
-                if ($res){ [$page_id,$token]=$res; $url=add_query_arg('token',rawurlencode($token),get_permalink($page_id)); $msg=sprintf('Pagina voor order <strong>%s</strong> is aangemaakt/bijgewerkt: <a href="%s" target="_blank" rel="noopener">%s</a>',esc_html($my),esc_url($url),esc_html($url)); }
-                else { $msg='Er ging iets mis bij het aanmaken of bijwerken van de pagina.'; }
+            $my=trim($my);
+            $invoice=trim($invoice);
+
+            if ($my==='') {
+                $error_msg='Vul een eigen ordernummer in.';
+            } elseif ($invoice==='') {
+                $error_msg='Vul een Invoice Ninja factuurnummer in.';
+            } else {
+                $client=function_exists('rmh_get_invoice_ninja_client_singleton')?rmh_get_invoice_ninja_client_singleton():null;
+                if(!$client){
+                    $error_msg='Invoice Ninja integratie is niet geconfigureerd of niet ingeschakeld.';
+                } else {
+                    $details=$client->get_invoice_portal_details($invoice);
+                    if(!is_array($details) || !array_key_exists('custom_value1',$details)){
+                        $error_msg='Kon het Print.com ordernummer (custom_value1) niet ophalen uit de factuur.';
+                    } else {
+                        $raw_print=trim((string)$details['custom_value1']);
+                        if($raw_print===''){
+                            $error_msg='Het opgehaalde Print.com ordernummer is leeg.';
+                        } else {
+                            $print=sanitize_text_field($raw_print);
+                            if($print===''){
+                                $error_msg='Het opgehaalde Print.com ordernummer bevat ongeldige tekens.';
+                            } else {
+                                $res=$this->create_or_update_page_for_order($my,$print,$invoice);
+                                if ($res){ [$page_id,$token]=$res; $url=add_query_arg('token',rawurlencode($token),get_permalink($page_id)); $msg=sprintf('Pagina voor order <strong>%s</strong> is aangemaakt/bijgewerkt: <a href="%s" target="_blank" rel="noopener">%s</a>. Print.com order: <strong>%s</strong>.',esc_html($my),esc_url($url),esc_html($url),esc_html($print)); }
+                                else { $error_msg='Er ging iets mis bij het aanmaken of bijwerken van de pagina.'; }
+                            }
+                        }
+                    }
+                }
             }
         }
 
@@ -285,13 +312,13 @@ class Printcom_Order_Tracker {
             <?php endif; ?>
             
             <h1>Print.com Orders</h1>
+            <?php if ($error_msg): ?><div class="notice notice-error"><p><?php echo esc_html($error_msg); ?></p></div><?php endif; ?>
             <?php if ($msg): ?><div class="notice notice-success"><p><?php echo wp_kses_post($msg); ?></p></div><?php endif; ?>
             <form method="post">
                 <?php wp_nonce_field('printcom_ot_new_order_action','printcom_ot_nonce'); ?>
                 <table class="form-table">
                     <tr><th><label for="rmh_ot_my_order">Eigen ordernummer</label></th><td><input type="text" id="rmh_ot_my_order" name="rmh_ot_my_order" class="regular-text" required/></td></tr>
-                    <tr><th><label for="rmh_ot_print_order">Print.com ordernummer</label></th><td><input type="text" id="rmh_ot_print_order" name="rmh_ot_print_order" class="regular-text" required/><p class="description">Koppel jouw ordernummer aan een Print.com order.</p></td></tr>
-                    <tr><th><label for="rmh_ot_invoice_number">Invoice Ninja factuurnummer</label></th><td><input type="text" id="rmh_ot_invoice_number" name="rmh_ot_invoice_number" class="regular-text"/><p class="description">Optioneel: gebruik dit om direct de juiste Invoice Ninja factuur te koppelen.</p></td></tr>
+                    <tr><th><label for="rmh_ot_invoice_number">Invoice Ninja factuurnummer</label></th><td><input type="text" id="rmh_ot_invoice_number" name="rmh_ot_invoice_number" class="regular-text" required/><p class="description">Het Print.com ordernummer wordt automatisch opgehaald uit <code>custom_value1</code> van deze factuur.</p></td></tr>
                 </table>
                 <?php submit_button('Pagina aanmaken/bijwerken'); ?>
             </form>
