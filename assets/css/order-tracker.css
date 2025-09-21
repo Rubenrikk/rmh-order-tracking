@@ -15,7 +15,7 @@
 .rmh-ot__lookup-form input{padding:10px;border:1px solid #ddd;border-radius:8px}
 .rmh-ot__lookup-form .btn{grid-column:1/-1;width:100%;font-weight:700}
 .rmh-ot__items{display:flex;flex-direction:column;width:100%;max-width:1200px;margin-left:auto;margin-right:auto;}
-.rmh-ot__items h3{margin:10px 0;text-align:center;margin-left:0}
+.rmh-ot__items h3{margin:0;text-align:center;margin-left:0}
 .rmh-ot__items h3.rmh-ot__overview-title{margin-top:50px;margin-bottom:10px}
 @media(min-width:901px){
   .rmh-ot__items h3.rmh-ot__overview-title{margin-top:80px}
@@ -203,7 +203,7 @@
 
 @media (min-width: 992px) {
   .rmh-invoice-card{padding:36px;gap:24px}
-  .rmh-invoice-card__header{display:grid;grid-template-columns:1fr;row-gap:18px;align-items:start;justify-items:stretch}
+  .rmh-invoice-card__header{display:grid;grid-template-columns:1fr;row-gap:0px;align-items:start;justify-items:stretch}
   .rmh-invoice-card__badge{display:none}
   .rmh-invoice-card__status-region{margin-top:0;width:100%}
   .rmh-invoice-card__status{padding:12px 18px;gap:12px;box-shadow:0 6px 18px rgba(36,50,95,.12)}
