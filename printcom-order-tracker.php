@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     2.4.27
+ * Version:     2.4.28
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -13,7 +13,7 @@ if (!defined('ABSPATH')) exit;
 require_once plugin_dir_path(__FILE__) . 'includes/class-rmh-invoice-ninja-client.php';
 
 class Printcom_Order_Tracker {
-    public const PLUGIN_VERSION = '2.4.27';
+    public const PLUGIN_VERSION = '2.4.28';
     public const USER_AGENT     = 'RMH-Printcom-Tracker/1.6.1 (+WordPress)';
 
     const OPT_SETTINGS     = 'printcom_ot_settings';
@@ -1817,7 +1817,7 @@ class Printcom_Order_Tracker {
             'DRAFT'                => 'Concept',
             'FINISHED'             => 'Afgewerkt',
             'INTRANSIT'            => 'Onderweg',
-            'MANUALCHECK'          => 'Handmatige controle',
+            'MANUALCHECK'          => 'Bestelling wordt verwerkt',
             'ERROR'                => 'Fout',
             'WAITINGFORPAYMENT'    => 'Wacht op betaling',
             'ORDERRECEIVED'        => 'Bestelling ontvangen',
@@ -1830,10 +1830,10 @@ class Printcom_Order_Tracker {
             'QUALITYREJECTED'      => 'Kwaliteit afgekeurd',
 
             'READYFORPRODUCTION'   => 'Gereed voor productie',
-            'REFUSEDBYSUPPLIER'    => 'Geweigerd door leverancier',
+            'REFUSEDBYSUPPLIER'    => 'Geweigerd door RikkerMediaHub',
             'RETURNED'             => 'Geretourneerd',
             'RETURNREQUESTED'      => 'Retour aangevraagd',
-            'SENTTOSUPPLIER'       => 'Verstuurd naar leverancier',
+            'SENTTOSUPPLIER'       => 'Verstuurd naar RikkerMediaHub',
             'SHIPPED'              => 'Verzonden',
         ];
         $s = strtoupper($s);
