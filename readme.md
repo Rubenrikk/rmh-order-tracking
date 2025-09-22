@@ -19,7 +19,7 @@ Tokens worden automatisch vernieuwd. Ontworpen om goed samen te werken met **Div
 - Zoekformulier op ordernummer + postcode via shortcode [print_order_lookup]
 - Cache instelbaar (default 30 minuten)
 - Ondersteuning voor eigen afbeelding per orderpagina
-- Automatische productafbeeldingen vanuit `/productimg/` op basis van factuurnummer (ook bij WordPress-installaties in een submap)
+- Automatische productafbeeldingen vanuit `/productimg/` op basis van factuurnummer en regelnummers (met fallback op legacy bijlagen en placeholders)
 - Tokens worden automatisch vernieuwd
 
 ## Gebruik
@@ -32,6 +32,19 @@ Tokens worden automatisch vernieuwd. Ontworpen om goed samen te werken met **Div
 - Nieuwe pagina’s worden onder `/bestellingen/` geplaatst en automatisch ingesteld op het Divi full-width template zonder zijbalk.
 - In het metabox **Productfoto’s (per item)** kun je per orderItemNumber een eigen afbeelding koppelen die op de statuspagina verschijnt.
 - Verwijder je een order, dan wist de plugin ook de gekoppelde pagina, cache en statusgegevens.
+
+### Productafbeeldingen
+- De plugin zoekt automatisch naar bestandsnamen in het formaat `{factuurnummer}-{regelindex}.{ext}` waarbij de regelindex 1-based is (dus de eerste regel gebruikt `-1`).
+- Ondersteunde extensies zijn `png`, `jpg`, `jpeg` en `webp` (hoofd-/kleine letters zijn toegestaan). Varianten met `@2x` of `-large` worden automatisch aan `srcset` en `sizes` toegevoegd voor scherpe retina-beelden.
+- Zoekvolgorde voor afbeeldingen:
+  1. `ABSPATH . 'productimg'`
+  2. `$_SERVER['DOCUMENT_ROOT'] . '/productimg'`
+  3. `home_path() . 'productimg'`
+  De eerste leesbare match wordt gebruikt; paden kunnen worden uitgebreid via de filter `rmh_productimg_bases`.
+- Vind je meerdere varianten, dan genereert de plugin nette HTML: `<figure class="rmh-orderline-image"><img ... /></figure>` met `loading="lazy"` en `decoding="async"`.
+- Wanneer er geen bestand wordt gevonden, valt de weergave terug op legacy bijlagen en daarna op de ingebouwde placeholder, tenzij legacy expliciet is uitgeschakeld.
+- Legacy fallback uitschakelen kan via de optie **Legacy afbeeldingkoppeling uitschakelen** op de instellingenpagina of door `define('RMH_DISABLE_LEGACY_IMAGES', true);` in `wp-config.php` te plaatsen (de constante heeft voorrang).
+- Resultaten van zoekacties worden 15 minuten gecachet in transients om schijf-hits te beperken. Extra filters: `rmh_productimg_exts`, `rmh_productimg_enable_autoload` en `rmh_productimg_render_html` voor geavanceerde aanpassingen.
 
 ### Cache & tokens
 - API-resultaten worden als transient opgeslagen. Actieve orders worden standaard 5 minuten gecachet; afgeronde orders blijven 24 uur warm voor snelle laadtijden.
