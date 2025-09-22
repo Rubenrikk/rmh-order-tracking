@@ -19,7 +19,7 @@ Tokens worden automatisch vernieuwd. Ontworpen om goed samen te werken met **Div
 - Zoekformulier op ordernummer + postcode via shortcode [print_order_lookup]
 - Cache instelbaar (default 30 minuten)
 - Ondersteuning voor eigen afbeelding per orderpagina
-- Automatische productafbeeldingen vanuit `/productimg/` op basis van factuurnummer
+- Automatische productafbeeldingen vanuit `/productimg/` op basis van factuurnummer (ook bij WordPress-installaties in een submap)
 - Tokens worden automatisch vernieuwd
 
 ## Gebruik

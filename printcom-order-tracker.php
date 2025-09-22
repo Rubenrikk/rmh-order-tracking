@@ -2,7 +2,8 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     2.4.29
+
+ * Version:     2.4.30
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -13,7 +14,7 @@ if (!defined('ABSPATH')) exit;
 require_once plugin_dir_path(__FILE__) . 'includes/class-rmh-invoice-ninja-client.php';
 
 class Printcom_Order_Tracker {
-    public const PLUGIN_VERSION = '2.4.29';
+    public const PLUGIN_VERSION = '2.4.30';
     public const USER_AGENT     = 'RMH-Printcom-Tracker/1.6.1 (+WordPress)';
 
     const OPT_SETTINGS     = 'printcom_ot_settings';
@@ -1793,20 +1794,83 @@ class Printcom_Order_Tracker {
             sprintf('%s-%d.PNG', $sanitized_invoice, $position),
         ];
 
+        $relative_base = 'productimg/';
+        $relative_url  = '/' . ltrim($relative_base, '/');
+
         foreach ($candidates as $filename) {
-            $relative_path = 'productimg/' . $filename;
-            $absolute_path = trailingslashit(ABSPATH) . $relative_path;
+            $relative_path = $relative_base . $filename;
 
-            if (!is_readable($absolute_path)) {
-                continue;
+            foreach ($this->get_product_image_base_paths() as $base_path) {
+                $absolute_path = $base_path . $relative_path;
+
+                if (!is_readable($absolute_path)) {
+                    continue;
+                }
+
+                $url = home_url($relative_url . $filename);
+
+                return '<div class="order-image"><img src="' . esc_url($url) . '" alt="Productafbeelding" loading="lazy" class="rmh-ot__image" /></div>';
             }
-
-            $url = home_url('/' . $relative_path);
-
-            return '<div class="order-image"><img src="' . esc_url($url) . '" alt="Productafbeelding" loading="lazy" class="rmh-ot__image" /></div>';
         }
 
         return null;
+    }
+
+    /**
+     * Geef een lijst met basispaden waarin we productafbeeldingen proberen te vinden.
+     *
+     * Hiermee ondersteunen we installaties waarbij WordPress in een submap staat maar de productimg-map
+     * rechtstreeks in de public_html wortel is geplaatst.
+     *
+     * @return string[] Geëxporteerde paden (met trailing slash) waar relatief naar gezocht kan worden.
+     */
+    private function get_product_image_base_paths(): array {
+        $paths = [];
+
+        if (defined('ABSPATH')) {
+            $paths[] = trailingslashit(ABSPATH);
+        }
+
+        if (!function_exists('get_home_path') && defined('ABSPATH')) {
+            $file = trailingslashit(ABSPATH) . 'wp-admin/includes/file.php';
+            if (is_readable($file)) {
+                require_once $file;
+            }
+        }
+
+        if (function_exists('get_home_path')) {
+            $home_path = get_home_path();
+            if (is_string($home_path) && $home_path !== '') {
+                $paths[] = trailingslashit($home_path);
+            }
+        }
+
+        if (!empty($_SERVER['DOCUMENT_ROOT'])) {
+            $doc_root = wp_normalize_path((string) $_SERVER['DOCUMENT_ROOT']);
+            if ($doc_root !== '') {
+                $paths[] = trailingslashit($doc_root);
+            }
+        }
+
+        $normalized = [];
+        foreach ($paths as $path) {
+            if (!is_string($path) || $path === '') {
+                continue;
+            }
+
+            $normalized_path = wp_normalize_path($path);
+            if ($normalized_path === '') {
+                continue;
+            }
+
+            if (substr($normalized_path, -1) !== '/') {
+                $normalized_path .= '/';
+            }
+
+            $normalized[$normalized_path] = true;
+        }
+
+        return array_keys($normalized);
     }
 
     private function resolve_item_image_id(string $orderItemNumber, array $map): int {
