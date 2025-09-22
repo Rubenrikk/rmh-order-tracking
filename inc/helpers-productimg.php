@@ -46,7 +46,7 @@ if (!function_exists('rmh_productimg_get_default_bases')) {
             $path = rmh_productimg_normalize_path(trailingslashit(ABSPATH) . 'productimg');
             $bases[$path] = [
                 'path'     => $path,
-                'url_base' => trailingslashit(site_url()) . 'productimg/',
+                'url_base' => trailingslashit(home_url()) . 'productimg/',
             ];
         }
 
@@ -174,10 +174,40 @@ if (!function_exists('rmh_productimg_normalize_invoice')) {
     }
 }
 
+if (!defined('RMH_IMG_CACHE_TTL_HIT')) {
+    define('RMH_IMG_CACHE_TTL_HIT', 15 * MINUTE_IN_SECONDS);
+}
+
+if (!defined('RMH_IMG_CACHE_TTL_MISS')) {
+    define('RMH_IMG_CACHE_TTL_MISS', 5 * MINUTE_IN_SECONDS);
+}
+
 if (!function_exists('rmh_productimg_cache_key')) {
     function rmh_productimg_cache_key(string $invoice, int $lineIndex): string {
-        $key = strtolower($invoice) . '|' . $lineIndex;
+        $salt = defined('RMH_IMG_CACHE_BUSTER') ? RMH_IMG_CACHE_BUSTER : '';
+        $key  = strtolower($invoice) . '|' . $lineIndex . '|' . $salt;
         return 'rmh_prodimg_' . md5($key);
+    }
+}
+
+if (!function_exists('rmh_resolve_orderline_image')) {
+    /**
+     * Resolve the automatic product image for an invoice + order line index.
+     *
+     * @param mixed $invoiceNumber Raw invoice identifier (will be normalised).
+     * @param mixed $lineIndex     Order line index (1-based).
+     *
+     * @return array|null Result data (`url`, `path`, optionally `width`, `height`, `srcset`, `sizes`) or null when missing.
+     */
+    function rmh_resolve_orderline_image($invoiceNumber, $lineIndex): ?array {
+        $invoice = rmh_productimg_normalize_invoice($invoiceNumber);
+        $line    = (int) $lineIndex;
+
+        if ($invoice === '' || $line < 1) {
+            return null;
+        }
+
+        return rmh_productimg_find_image($invoice, $line);
     }
 }
 
@@ -289,7 +319,7 @@ if (!function_exists('rmh_productimg_find_image')) {
                         }
                     }
 
-                    set_transient($cache_key, ['found' => true, 'data' => $result], 15 * MINUTE_IN_SECONDS);
+                    set_transient($cache_key, ['found' => true, 'data' => $result], RMH_IMG_CACHE_TTL_HIT);
                     rmh_productimg_debug_log('Gevonden: ' . $absolute);
 
                     return $result;
@@ -297,7 +327,7 @@ if (!function_exists('rmh_productimg_find_image')) {
             }
         }
 
-        set_transient($cache_key, ['found' => false], 15 * MINUTE_IN_SECONDS);
+        set_transient($cache_key, ['found' => false], RMH_IMG_CACHE_TTL_MISS);
         rmh_productimg_debug_log('Geen afbeelding gevonden voor ' . $target);
 
         return null;
@@ -317,7 +347,7 @@ if (!function_exists('rmh_render_orderline_image')) {
 
         $image = null;
         if ($invoice !== '' && $line >= 1) {
-            $image = rmh_productimg_find_image($invoice, $line);
+            $image = rmh_resolve_orderline_image($invoice, $line);
         }
 
         if ($image) {
