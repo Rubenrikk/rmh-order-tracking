@@ -55,7 +55,7 @@ if (!function_exists('rmh_productimg_render_debug_shortcode')) {
         $result = rmh_resolve_orderline_image($invoice, $line);
         if (!$result) {
             $message = sprintf(
-                esc_html__('Geen bestand gevonden. Controleer naam (%1$s-%2$d.{ext}), 1-based index, extensie, rechten of stel tijdelijk RMH_IMG_CACHE_BUSTER in.', 'printcom-order-tracker'),
+                esc_html__('Geen bestand gevonden. Controleer naam (%1$s-%2$d.{ext}), 1-based index, extensie, rechten of verhoog tijdelijk de cache-buster (optie rmh_img_cache_buster, admin-knop of RMH_IMG_CACHE_BUSTER).', 'printcom-order-tracker'),
                 $invoice,
                 $line
             );
