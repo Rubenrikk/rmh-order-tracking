@@ -3,7 +3,7 @@
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
 
- * Version:     2.4.30
+ * Version:     2.4.31
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -12,9 +12,10 @@
 if (!defined('ABSPATH')) exit;
 
 require_once plugin_dir_path(__FILE__) . 'includes/class-rmh-invoice-ninja-client.php';
+require_once plugin_dir_path(__FILE__) . 'inc/helpers-productimg.php';
 
 class Printcom_Order_Tracker {
-    public const PLUGIN_VERSION = '2.4.30';
+    public const PLUGIN_VERSION = '2.4.31';
     public const USER_AGENT     = 'RMH-Printcom-Tracker/1.6.1 (+WordPress)';
 
     const OPT_SETTINGS     = 'printcom_ot_settings';
@@ -106,6 +107,7 @@ class Printcom_Order_Tracker {
 
     public function register_settings() {
         register_setting(self::OPT_SETTINGS, self::OPT_SETTINGS, [$this,'sanitize_settings']);
+        register_setting(self::OPT_SETTINGS, 'rmh_disable_legacy_images', [$this,'sanitize_disable_legacy_images']);
         add_settings_section('printcom_ot_section','API-instellingen','__return_false',self::OPT_SETTINGS);
         add_settings_section('printcom_ot_invoice_ninja','Invoice Ninja',[$this,'render_invoice_ninja_section_description'],self::OPT_SETTINGS);
         $s = $this->get_settings();
@@ -125,6 +127,7 @@ class Printcom_Order_Tracker {
         $add('printcom_ot_section','username','Username',sprintf('<input type="text" name="%s[username]" value="%s" class="regular-text"/>',esc_attr(self::OPT_SETTINGS),esc_attr($s['username']??'')));
         $add('printcom_ot_section','password','Password',sprintf('<input type="password" name="%s[password]" value="%s" class="regular-text"/>',esc_attr(self::OPT_SETTINGS),esc_attr($s['password']??'')));
         $add('printcom_ot_section','default_cache_ttl','Cache (minuten)',sprintf('<input type="number" min="0" step="1" name="%s[default_cache_ttl]" value="%d" class="small-text"/>',esc_attr(self::OPT_SETTINGS),isset($s['default_cache_ttl'])?(int)$s['default_cache_ttl']:5),'HOT=5m, COLD=24u.');
+        add_settings_field('rmh_disable_legacy_images','Legacy afbeeldingkoppeling uitschakelen',[$this,'render_disable_legacy_images_field'],self::OPT_SETTINGS,'printcom_ot_section');
 
         $enabled_checked = checked(!empty($s['rmh_integration_enabled']), true, false);
         $add('printcom_ot_invoice_ninja','rmh_integration_enabled','Integratie inschakelen',sprintf('<label><input type="checkbox" name="%1$s[rmh_integration_enabled]" value="1" %2$s/> Schakel Invoice Ninja integratie in</label>',esc_attr(self::OPT_SETTINGS),$enabled_checked),'Toon de betaallink op de track-&-trace pagina.');
@@ -155,6 +158,38 @@ class Printcom_Order_Tracker {
         $o['rmh_in_api_token']=trim(sanitize_text_field($in['rmh_in_api_token']??''));
         $o['rmh_in_cache_minutes']=max(0,(int)($in['rmh_in_cache_minutes']??10));
         return $o;
+    }
+
+    public function sanitize_disable_legacy_images($value) {
+        if (defined('RMH_DISABLE_LEGACY_IMAGES')) {
+            return get_option('rmh_disable_legacy_images', 0);
+        }
+
+        return !empty($value) ? 1 : 0;
+    }
+
+    public function render_disable_legacy_images_field() {
+        $option_value = (int) get_option('rmh_disable_legacy_images', 0);
+        $disabled = false;
+
+        if (defined('RMH_DISABLE_LEGACY_IMAGES')) {
+            $option_value = RMH_DISABLE_LEGACY_IMAGES ? 1 : 0;
+            $disabled = true;
+        }
+
+        $checkbox = sprintf(
+            '<input type="checkbox" name="rmh_disable_legacy_images" value="1" %s %s/>',
+            checked($option_value, 1, false),
+            $disabled ? 'disabled="disabled"' : ''
+        );
+
+        echo '<label>' . $checkbox . ' ' . esc_html__('Alleen automatische productafbeeldingen en placeholders gebruiken.', 'printcom-order-tracker') . '</label>';
+
+        if ($disabled) {
+            echo '<p class="description">' . esc_html__('Deze instelling wordt overschreven door de constante RMH_DISABLE_LEGACY_IMAGES in wp-config.php.', 'printcom-order-tracker') . '</p>';
+        } else {
+            echo '<p class="description">' . esc_html__('Schakel deze optie in om legacy bijlagen als fallback uit te schakelen.', 'printcom-order-tracker') . '</p>';
+        }
     }
 
     private function normalize_invoice_ninja_base_url($url): string {
@@ -779,6 +814,8 @@ class Printcom_Order_Tracker {
         }
 
         $html .= '<div class="rmh-ot__items"><h3 class="rmh-ot__overview-title">Overzicht van je bestelling</h3>';
+        $legacy_images_disabled = rmh_productimg_is_legacy_disabled();
+
         if($items && is_array($items)){
             $html .= '<div class="rmh-ot__grid">';
             foreach($items as $index=>$it){
@@ -788,15 +825,27 @@ class Printcom_Order_Tracker {
                 $title = $this->pretty_product_title($it);
 
                 // Afbeelding
-                $img_html = '';
-                $fs_image_html = $this->render_order_item_image_from_invoice($invoice_number, $n);
-                if ($fs_image_html !== null) {
-                    $img_html = $fs_image_html;
-                } elseif ($inum) {
+                $legacy_html = '';
+                if (!$legacy_images_disabled && $inum) {
                     $att_id = $this->resolve_item_image_id($inum, $item_imgs);
-                    if ($att_id > 0) $img_html = wp_get_attachment_image($att_id, 'large', false, ['class'=>'rmh-ot__image']);
+                    if ($att_id > 0) {
+                        $legacy_html = wp_get_attachment_image(
+                            $att_id,
+                            'large',
+                            false,
+                            [
+                                'class'    => 'rmh-ot__image rmh-orderline-image__img',
+                                'loading'  => 'lazy',
+                                'decoding' => 'async',
+                            ]
+                        );
+                    }
                 }
-                if (!$img_html) $img_html = $this->placeholder_svg();
+
+                $img_html = rmh_render_orderline_image($invoice_number, $n, [
+                    'legacy_html'      => $legacy_html,
+                    'placeholder_html' => $this->placeholder_svg(),
+                ]);
 
                 // Status badge (NL)
                 $it_status = isset($it['status']) ? (string)$it['status'] : '';
@@ -1775,102 +1824,7 @@ class Printcom_Order_Tracker {
     }
 
     private function placeholder_svg(): string {
-        return '<svg class="rmh-ot__image" role="img" aria-label="Afbeelding volgt" xmlns="http://www.w3.org/2000/svg" width="600" height="338" viewBox="0 0 600 338"><rect width="100%" height="100%" fill="#f2f2f2"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#999" font-family="Arial,Helvetica,sans-serif" font-size="18">Afbeelding volgt</text></svg>';
-    }
-
-    private function render_order_item_image_from_invoice(?string $invoiceNumber, int $position): ?string {
-        $invoiceNumber = is_string($invoiceNumber) ? trim($invoiceNumber) : '';
-        if ($invoiceNumber === '' || $position < 1) {
-            return null;
-        }
-
-        $sanitized_invoice = preg_replace('/[^A-Za-z0-9_-]/', '', $invoiceNumber);
-        if (!is_string($sanitized_invoice) || $sanitized_invoice === '') {
-            return null;
-        }
-
-        $candidates = [
-            sprintf('%s-%d.png', $sanitized_invoice, $position),
-            sprintf('%s-%d.PNG', $sanitized_invoice, $position),
-        ];
-
-        $relative_base = 'productimg/';
-        $relative_url  = '/' . ltrim($relative_base, '/');
-
-        foreach ($candidates as $filename) {
-            $relative_path = $relative_base . $filename;
-
-            foreach ($this->get_product_image_base_paths() as $base_path) {
-                $absolute_path = $base_path . $relative_path;
-
-                if (!is_readable($absolute_path)) {
-                    continue;
-                }
-
-                $url = home_url($relative_url . $filename);
-
-                return '<div class="order-image"><img src="' . esc_url($url) . '" alt="Productafbeelding" loading="lazy" class="rmh-ot__image" /></div>';
-            }
-        }
-
-        return null;
-    }
-
-    /**
-     * Geef een lijst met basispaden waarin we productafbeeldingen proberen te vinden.
-     *
-     * Hiermee ondersteunen we installaties waarbij WordPress in een submap staat maar de productimg-map
-     * rechtstreeks in de public_html wortel is geplaatst.
-     *
-     * @return string[] Geëxporteerde paden (met trailing slash) waar relatief naar gezocht kan worden.
-     */
-    private function get_product_image_base_paths(): array {
-        $paths = [];
-
-        if (defined('ABSPATH')) {
-            $paths[] = trailingslashit(ABSPATH);
-        }
-
-        if (!function_exists('get_home_path') && defined('ABSPATH')) {
-            $file = trailingslashit(ABSPATH) . 'wp-admin/includes/file.php';
-            if (is_readable($file)) {
-                require_once $file;
-            }
-        }
-
-        if (function_exists('get_home_path')) {
-            $home_path = get_home_path();
-            if (is_string($home_path) && $home_path !== '') {
-                $paths[] = trailingslashit($home_path);
-            }
-        }
-
-        if (!empty($_SERVER['DOCUMENT_ROOT'])) {
-            $doc_root = wp_normalize_path((string) $_SERVER['DOCUMENT_ROOT']);
-            if ($doc_root !== '') {
-                $paths[] = trailingslashit($doc_root);
-            }
-        }
-
-        $normalized = [];
-        foreach ($paths as $path) {
-            if (!is_string($path) || $path === '') {
-                continue;
-            }
-
-            $normalized_path = wp_normalize_path($path);
-            if ($normalized_path === '') {
-                continue;
-            }
-
-            if (substr($normalized_path, -1) !== '/') {
-                $normalized_path .= '/';
-            }
-
-            $normalized[$normalized_path] = true;
-        }
-
-        return array_keys($normalized);
+        return '<svg class="rmh-ot__image rmh-orderline-image__img" role="img" aria-label="Afbeelding volgt" xmlns="http://www.w3.org/2000/svg" width="600" height="338" viewBox="0 0 600 338"><rect width="100%" height="100%" fill="#f2f2f2"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#999" font-family="Arial,Helvetica,sans-serif" font-size="18">Afbeelding volgt</text></svg>';
     }
 
     private function resolve_item_image_id(string $orderItemNumber, array $map): int {
