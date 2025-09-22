@@ -1,5 +1,8 @@
 # Changelog
 
+## 2.4.33
+- Confirmed compatibility with WordPress 6.8.2 and PHP 8.3.
+
 ## 2.4.32
 - Fix: URL-base met `home_url()` voor submap-installaties.
 - Feat: Debugtools — shortcode `[rmh_test_image]`, admin testpagina en WP-CLI commando `wp rmh img-test`.
