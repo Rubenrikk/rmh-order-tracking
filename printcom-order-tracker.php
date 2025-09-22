@@ -15,14 +15,17 @@ require_once plugin_dir_path(__FILE__) . 'includes/class-rmh-invoice-ninja-clien
 require_once plugin_dir_path(__FILE__) . 'inc/helpers-productimg.php';
 
 if (is_admin()) {
-    $rmh_can_load_admin_tools = true;
-    if (function_exists('current_user_can')) {
-        $rmh_can_load_admin_tools = current_user_can('manage_options');
-    }
+    add_action('admin_init', static function () {
+        if (!function_exists('current_user_can')) {
+            return;
+        }
 
-    if ($rmh_can_load_admin_tools) {
+        if (!current_user_can('manage_options')) {
+            return;
+        }
+
         require_once plugin_dir_path(__FILE__) . 'inc/admin-test-page.php';
-    }
+    });
 }
 
 add_action('init', function () {
