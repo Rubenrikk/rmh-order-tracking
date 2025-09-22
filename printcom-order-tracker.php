@@ -2,7 +2,7 @@
 /**
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
- * Version:     2.4.28
+ * Version:     2.4.29
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -13,7 +13,7 @@ if (!defined('ABSPATH')) exit;
 require_once plugin_dir_path(__FILE__) . 'includes/class-rmh-invoice-ninja-client.php';
 
 class Printcom_Order_Tracker {
-    public const PLUGIN_VERSION = '2.4.28';
+    public const PLUGIN_VERSION = '2.4.29';
     public const USER_AGENT     = 'RMH-Printcom-Tracker/1.6.1 (+WordPress)';
 
     const OPT_SETTINGS     = 'printcom_ot_settings';
@@ -628,6 +628,7 @@ class Printcom_Order_Tracker {
         $map            = $maps[$own];
         $token          = $map['token'] ?? '';
         $orderNum       = $map['print_order'];
+        $invoice_number = isset($map['invoice_id']) ? trim((string) $map['invoice_id']) : '';
         $requestedToken = isset($_GET['token']) ? sanitize_text_field(wp_unslash($_GET['token'])) : '';
         $valid          = is_user_logged_in() || ($requestedToken !== '' && $requestedToken === $token);
         if (!$valid) {
@@ -780,13 +781,17 @@ class Printcom_Order_Tracker {
         if($items && is_array($items)){
             $html .= '<div class="rmh-ot__grid">';
             foreach($items as $index=>$it){
+                $n = $index + 1;
                 $inum = $it['orderItemNumber'] ?? '';
                 $qty  = isset($it['quantity']) ? (int)$it['quantity'] : null;
                 $title = $this->pretty_product_title($it);
 
                 // Afbeelding
                 $img_html = '';
-                if ($inum) {
+                $fs_image_html = $this->render_order_item_image_from_invoice($invoice_number, $n);
+                if ($fs_image_html !== null) {
+                    $img_html = $fs_image_html;
+                } elseif ($inum) {
                     $att_id = $this->resolve_item_image_id($inum, $item_imgs);
                     if ($att_id > 0) $img_html = wp_get_attachment_image($att_id, 'large', false, ['class'=>'rmh-ot__image']);
                 }
@@ -822,7 +827,6 @@ class Printcom_Order_Tracker {
                 }
 
                 // Render
-                $n = $index + 1;
                 $html .= '<div class="rmh-ot__item">';
                 $html .=   '<div class="rmh-ot__item-header">';
                 $html .=     '<div class="rmh-ot__badge-top">'.$status_badge.'</div>';
@@ -1771,6 +1775,38 @@ class Printcom_Order_Tracker {
 
     private function placeholder_svg(): string {
         return '<svg class="rmh-ot__image" role="img" aria-label="Afbeelding volgt" xmlns="http://www.w3.org/2000/svg" width="600" height="338" viewBox="0 0 600 338"><rect width="100%" height="100%" fill="#f2f2f2"/><text x="50%" y="50%" dominant-baseline="middle" text-anchor="middle" fill="#999" font-family="Arial,Helvetica,sans-serif" font-size="18">Afbeelding volgt</text></svg>';
+    }
+
+    private function render_order_item_image_from_invoice(?string $invoiceNumber, int $position): ?string {
+        $invoiceNumber = is_string($invoiceNumber) ? trim($invoiceNumber) : '';
+        if ($invoiceNumber === '' || $position < 1) {
+            return null;
+        }
+
+        $sanitized_invoice = preg_replace('/[^A-Za-z0-9_-]/', '', $invoiceNumber);
+        if (!is_string($sanitized_invoice) || $sanitized_invoice === '') {
+            return null;
+        }
+
+        $candidates = [
+            sprintf('%s-%d.png', $sanitized_invoice, $position),
+            sprintf('%s-%d.PNG', $sanitized_invoice, $position),
+        ];
+
+        foreach ($candidates as $filename) {
+            $relative_path = 'productimg/' . $filename;
+            $absolute_path = trailingslashit(ABSPATH) . $relative_path;
+
+            if (!is_readable($absolute_path)) {
+                continue;
+            }
+
+            $url = home_url('/' . $relative_path);
+
+            return '<div class="order-image"><img src="' . esc_url($url) . '" alt="Productafbeelding" loading="lazy" class="rmh-ot__image" /></div>';
+        }
+
+        return null;
     }
 
     private function resolve_item_image_id(string $orderItemNumber, array $map): int {
