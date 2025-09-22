@@ -3,7 +3,7 @@
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
 
- * Version:     2.4.32
+ * Version:     2.4.33
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -18,21 +18,26 @@ if (is_admin()) {
     require_once plugin_dir_path(__FILE__) . 'inc/admin-test-page.php';
 }
 
-$load_debug_shortcode = false;
-if (function_exists('current_user_can') && current_user_can('manage_options')) {
-    $load_debug_shortcode = true;
-}
-$load_debug_shortcode = apply_filters('rmh_enable_debug_shortcodes', $load_debug_shortcode);
-if ($load_debug_shortcode) {
-    require_once plugin_dir_path(__FILE__) . 'inc/debug-shortcode.php';
-}
+add_action('init', function () {
+    $load_debug_shortcode = false;
+
+    if (function_exists('current_user_can')) {
+        $load_debug_shortcode = current_user_can('manage_options');
+    }
+
+    $load_debug_shortcode = apply_filters('rmh_enable_debug_shortcodes', $load_debug_shortcode);
+
+    if ($load_debug_shortcode) {
+        require_once __DIR__ . '/inc/debug-shortcode.php';
+    }
+});
 
 if (defined('WP_CLI') && WP_CLI) {
     require_once plugin_dir_path(__FILE__) . 'inc/cli-commands.php';
 }
 
 class Printcom_Order_Tracker {
-    public const PLUGIN_VERSION = '2.4.32';
+    public const PLUGIN_VERSION = '2.4.33';
     public const USER_AGENT     = 'RMH-Printcom-Tracker/1.6.1 (+WordPress)';
 
     const OPT_SETTINGS     = 'printcom_ot_settings';
