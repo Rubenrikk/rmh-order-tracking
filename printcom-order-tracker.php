@@ -3,7 +3,7 @@
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
 
- * Version:     2.4.33
+ * Version:     2.4.34
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -15,7 +15,14 @@ require_once plugin_dir_path(__FILE__) . 'includes/class-rmh-invoice-ninja-clien
 require_once plugin_dir_path(__FILE__) . 'inc/helpers-productimg.php';
 
 if (is_admin()) {
-    require_once plugin_dir_path(__FILE__) . 'inc/admin-test-page.php';
+    $rmh_can_load_admin_tools = true;
+    if (function_exists('current_user_can')) {
+        $rmh_can_load_admin_tools = current_user_can('manage_options');
+    }
+
+    if ($rmh_can_load_admin_tools) {
+        require_once plugin_dir_path(__FILE__) . 'inc/admin-test-page.php';
+    }
 }
 
 add_action('init', function () {
@@ -37,7 +44,7 @@ if (defined('WP_CLI') && WP_CLI) {
 }
 
 class Printcom_Order_Tracker {
-    public const PLUGIN_VERSION = '2.4.33';
+    public const PLUGIN_VERSION = '2.4.34';
     public const USER_AGENT     = 'RMH-Printcom-Tracker/1.6.1 (+WordPress)';
 
     const OPT_SETTINGS     = 'printcom_ot_settings';
@@ -841,7 +848,7 @@ class Printcom_Order_Tracker {
         if($items && is_array($items)){
             $html .= '<div class="rmh-ot__grid">';
             foreach($items as $index=>$it){
-                $n = $index + 1;
+                $line_index = $index + 1;
                 $inum = $it['orderItemNumber'] ?? '';
                 $qty  = isset($it['quantity']) ? (int)$it['quantity'] : null;
                 $title = $this->pretty_product_title($it);
@@ -864,7 +871,7 @@ class Printcom_Order_Tracker {
                     }
                 }
 
-                $img_html = rmh_render_orderline_image($invoice_number, $n, [
+                $img_html = rmh_render_orderline_image($invoice_number, $line_index, [
                     'legacy_html'      => $legacy_html,
                     'placeholder_html' => $this->placeholder_svg(),
                 ]);
@@ -902,7 +909,7 @@ class Printcom_Order_Tracker {
                 $html .= '<div class="rmh-ot__item">';
                 $html .=   '<div class="rmh-ot__item-header">';
                 $html .=     '<div class="rmh-ot__badge-top">'.$status_badge.'</div>';
-                $html .=     '<h2 class="rmh-ot__title">'.$n.'. '.esc_html($title).'</h2>';
+                $html .=     '<h2 class="rmh-ot__title">'.$line_index.'. '.esc_html($title).'</h2>';
                 $html .=   '</div>';
 
                 $html .=   '<div class="rmh-ot__item-grid">';

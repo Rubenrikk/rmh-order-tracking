@@ -1,5 +1,12 @@
 # Changelog
 
+## 2.4.34
+- Fix: orderpagina toont opnieuw automatische productafbeeldingen met 1-based indexering.
+- Fix: URL-base overal via `home_url()` met controle op DOCUMENT_ROOT naar `https://rikkermediahub.com/productimg/`.
+- Feat: uitgebreide diagnose in admin inclusief pad/URL per basis, cache-details en cache-buster knop.
+- DX: HTML-debugcomment op orderregels bij `WP_DEBUG` voor snelle analyse van hits/misses.
+- Safe: extra WordPress-guards voor includes, capabilities en context.
+
 ## 2.4.33
 - Confirmed compatibility with WordPress 6.8.2 and PHP 8.3.
 

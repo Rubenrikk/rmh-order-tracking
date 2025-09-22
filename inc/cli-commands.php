@@ -58,7 +58,7 @@ if (!class_exists('RMH_Productimg_CLI_Command')) {
                 return;
             }
 
-            WP_CLI::warning('Geen bestand gevonden. Controleer naam, extensie, rechten of stel tijdelijk RMH_IMG_CACHE_BUSTER in.');
+            WP_CLI::warning('Geen bestand gevonden. Controleer naam, extensie, rechten of verhoog tijdelijk de cache-buster (optie rmh_img_cache_buster, admin-knop of constante RMH_IMG_CACHE_BUSTER).');
             WP_CLI::halt(1);
         }
     }
