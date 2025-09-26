@@ -1,5 +1,10 @@
 # Changelog
 
+## 2.5.3
+- Verberg het aantal exemplaren en leverdatum onder het bezorgadres wanneer een product maar één verzendadres heeft.
+- Toon bij meerdere adressen alleen het aantal exemplaren en laat de leverdatum achterwege omdat die elders zichtbaar is.
+- Versienummer verhoogd naar 2.5.3.
+
 ## 2.5.2
 - Herstelde de oorspronkelijke adresopmaak per orderregel en dupliceer deze wanneer meerdere zendingen aanwezig zijn.
 - Toon aantallen en leverdatums onder elk adresblok zonder extra labels voor de afleveradressen.
