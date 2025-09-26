@@ -1,5 +1,13 @@
 # Changelog
 
+## 2.5.0
+- Hardcode Print.com API en login endpoints in de plugin; instellingen voor base/auth/grant verwijderd.
+- Authenticatie gebruikt enkel gebruikersnaam en wachtwoord en verwijderde Client ID/Secret opties.
+- Legacy automatische productafbeeldingen en bijbehorende debugtools verwijderd; productfoto’s blijven handmatig per orderregel.
+- Instellingenpagina opgeschoond en testknoppen gegroepeerd onder “Debug opties”.
+- Print.com orders-overzicht toont nu de Invoice Ninja factuurhash en bewaart deze bij nieuwe koppelingen.
+- Lookup shortcode verduidelijkt het postcodeveld voor leveradressen en ondersteunt meerdere afleveradressen per bestelling.
+
 ## 2.4.34
 - Fix: orderpagina toont opnieuw automatische productafbeeldingen met 1-based indexering.
 - Fix: URL-base overal via `home_url()` met controle op DOCUMENT_ROOT naar `https://rikkermediahub.com/productimg/`.
