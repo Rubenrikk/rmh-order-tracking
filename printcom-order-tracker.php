@@ -3,7 +3,7 @@
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
 
- * Version:     2.5.1
+ * Version:     2.5.2
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) exit;
 require_once plugin_dir_path(__FILE__) . 'includes/class-rmh-invoice-ninja-client.php';
 
 class Printcom_Order_Tracker {
-    public const PLUGIN_VERSION = '2.5.1';
+    public const PLUGIN_VERSION = '2.5.2';
     public const API_BASE_URL   = 'https://api.print.com/';
     public const AUTH_URL       = 'https://api.print.com/login';
     public const USER_AGENT     = 'RMH-Printcom-Tracker/1.6.1 (+WordPress)';
@@ -889,43 +889,57 @@ class Printcom_Order_Tracker {
                 $html .=       '<h4>' . esc_html($address_heading) . '</h4>';
                 $shipments_rendered = 0;
 
-                foreach ($item_shipments as $idx => $shipment_info) {
+                foreach ($item_shipments as $shipment_info) {
                     $address_lines = [];
                     if (!empty($shipment_info['address']) && is_array($shipment_info['address'])) {
-                        $address_lines = $this->build_address_lines($shipment_info['address']);
+                        $address_lines = array_filter(array_map('trim', $this->build_address_lines($shipment_info['address'])));
                     }
 
-                    $copies_text = $this->format_shipment_copies($shipment_info['copies'] ?? null);
+                    $copies_text   = $this->format_shipment_copies($shipment_info['copies'] ?? null);
                     $delivery_text = $this->format_shipment_delivery_text($shipment_info);
 
-                    $display_parts = [];
-                    foreach ($address_lines as $line) {
-                        $line = trim($line);
-                        if ($line !== '') {
-                            $display_parts[] = $line;
-                        }
-                    }
+                    $meta_parts = [];
                     if ($copies_text) {
-                        $display_parts[] = $copies_text;
+                        $meta_parts[] = $copies_text;
                     }
                     if ($delivery_text) {
-                        $display_parts[] = sprintf('levering op %s', $delivery_text);
+                        $meta_parts[] = sprintf('Leverdatum: %s', $delivery_text);
                     }
 
-                    if (!$display_parts) {
+                    if (!$address_lines && !$meta_parts) {
                         continue;
                     }
 
                     $shipments_rendered++;
 
                     $html .= '<div class="rmh-ot__shipment">';
-                    $line_html = implode(', ', array_map('esc_html', $display_parts));
-                    $label_html = '';
-                    if ($multiple_shipments) {
-                        $label_html = '<span class="rmh-ot__shipment-title"><strong>' . esc_html(sprintf('Adres %d:', $idx + 1)) . '</strong></span> ';
+                    $html .= '<p class="rmh-ot__shipment-address">';
+
+                    if ($address_lines) {
+                        $address_html = '';
+                        foreach (array_values($address_lines) as $line_idx => $line) {
+                            $line_html = esc_html($line);
+                            if ($line_idx === 0) {
+                                $line_html = '<strong>' . $line_html . '</strong>';
+                            }
+
+                            if ($line_idx > 0) {
+                                $address_html .= '<br>';
+                            }
+                            $address_html .= $line_html;
+                        }
+
+                        $html .= $address_html;
+                        if ($meta_parts) {
+                            $html .= '<br>';
+                        }
                     }
 
-                    $html .= '<p class="rmh-ot__shipment-line">' . $label_html . $line_html . '</p>';
+                    if ($meta_parts) {
+                        $html .= '<small class="rmh-ot__shipment-meta">' . esc_html(implode(' • ', $meta_parts)) . '</small>';
+                    }
+
+                    $html .= '</p>';
                     $html .= '</div>';
                 }
 
