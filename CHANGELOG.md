@@ -1,5 +1,15 @@
 # Changelog
 
+## 2.5.2
+- Herstelde de oorspronkelijke adresopmaak per orderregel en dupliceer deze wanneer meerdere zendingen aanwezig zijn.
+- Toon aantallen en leverdatums onder elk adresblok zonder extra labels voor de afleveradressen.
+- Versienummer verhoogd naar 2.5.2.
+
+## 2.5.1
+- Toon meerdere afleveradressen per orderregel met aantallen en leverdatum op één regel.
+- Label de adressectie automatisch enkelvoud of meervoud en behoud compatibiliteit met postcode-lookup.
+- Versienummer verhoogd naar 2.5.1.
+
 ## 2.5.0
 - Hardcode Print.com API en login endpoints in de plugin; instellingen voor base/auth/grant verwijderd.
 - Authenticatie gebruikt enkel gebruikersnaam en wachtwoord en verwijderde Client ID/Secret opties.
