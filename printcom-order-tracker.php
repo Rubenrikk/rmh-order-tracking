@@ -3,7 +3,7 @@
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
 
- * Version:     2.5.0
+ * Version:     2.5.1
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) exit;
 require_once plugin_dir_path(__FILE__) . 'includes/class-rmh-invoice-ninja-client.php';
 
 class Printcom_Order_Tracker {
-    public const PLUGIN_VERSION = '2.5.0';
+    public const PLUGIN_VERSION = '2.5.1';
     public const API_BASE_URL   = 'https://api.print.com/';
     public const AUTH_URL       = 'https://api.print.com/login';
     public const USER_AGENT     = 'RMH-Printcom-Tracker/1.6.1 (+WordPress)';
@@ -832,7 +832,7 @@ class Printcom_Order_Tracker {
                 $eig = $specs['eigenschappen']; $extra = $specs['extras'];
 
                 // Bezorgadres (per item!)
-                $addr = $this->extract_item_address($it);
+                $item_shipments = $this->extract_item_shipments_details($it);
 
                 // Leverdata + methode (per item!)
                 $dw = $this->extract_item_delivery_window($it);
@@ -882,21 +882,54 @@ class Printcom_Order_Tracker {
                 // kolom 3: adres + datum/methode + T&T knop
                 $html .=   '<div class="rmh-ot__delivery">';
                 // Adres
-                $html .=     '<div class="rmh-ot__panel">';
-                $html .=       '<h4>Bezorgadres(sen)</h4>';
-                if ($addr) {
-                    $fn      = trim(($addr['firstName'] ?? '').' '.($addr['lastName'] ?? ''));
-                    $street  = trim(                ($addr['fullstreet'] ?? '').' '.($addr['houseNumber'] ?? ''));
-                    $city    = trim(($addr['postcode'] ?? '').' '.($addr['city'] ?? ''));
-                    $country = $addr['country'] ?? '';
+                $multiple_shipments = count($item_shipments) > 1;
+                $address_heading   = $multiple_shipments ? 'Bezorgadressen' : 'Bezorgadres';
 
-                    $html .= '<p>';
-                    if ($fn)      $html .= '<strong>'.esc_html($fn).'</strong><br>';
-                    if ($street)  $html .= esc_html($street).'<br>';
-                    if ($city)    $html .= esc_html($city).'<br>';
-                    if ($country) $html .= esc_html($country);
-                    $html .= '</p>';
-                } else {
+                $html .=     '<div class="rmh-ot__panel">';
+                $html .=       '<h4>' . esc_html($address_heading) . '</h4>';
+                $shipments_rendered = 0;
+
+                foreach ($item_shipments as $idx => $shipment_info) {
+                    $address_lines = [];
+                    if (!empty($shipment_info['address']) && is_array($shipment_info['address'])) {
+                        $address_lines = $this->build_address_lines($shipment_info['address']);
+                    }
+
+                    $copies_text = $this->format_shipment_copies($shipment_info['copies'] ?? null);
+                    $delivery_text = $this->format_shipment_delivery_text($shipment_info);
+
+                    $display_parts = [];
+                    foreach ($address_lines as $line) {
+                        $line = trim($line);
+                        if ($line !== '') {
+                            $display_parts[] = $line;
+                        }
+                    }
+                    if ($copies_text) {
+                        $display_parts[] = $copies_text;
+                    }
+                    if ($delivery_text) {
+                        $display_parts[] = sprintf('levering op %s', $delivery_text);
+                    }
+
+                    if (!$display_parts) {
+                        continue;
+                    }
+
+                    $shipments_rendered++;
+
+                    $html .= '<div class="rmh-ot__shipment">';
+                    $line_html = implode(', ', array_map('esc_html', $display_parts));
+                    $label_html = '';
+                    if ($multiple_shipments) {
+                        $label_html = '<span class="rmh-ot__shipment-title"><strong>' . esc_html(sprintf('Adres %d:', $idx + 1)) . '</strong></span> ';
+                    }
+
+                    $html .= '<p class="rmh-ot__shipment-line">' . $label_html . $line_html . '</p>';
+                    $html .= '</div>';
+                }
+
+                if ($shipments_rendered === 0) {
                     $html .= '<p><em>Nog geen adresinformatie beschikbaar.</em></p>';
                 }
                 $html .=     '</div>';
@@ -2073,9 +2106,143 @@ class Printcom_Order_Tracker {
     }
 
     private function extract_item_address(array $item): ?array {
-        foreach (($item['shipments'] ?? []) as $s) {
-            if (!empty($s['address'])) return $s['address'];
+        $shipments = $this->extract_item_shipments_details($item);
+        foreach ($shipments as $shipment) {
+            if (!empty($shipment['address']) && is_array($shipment['address'])) {
+                return $shipment['address'];
+            }
         }
+        return null;
+    }
+
+    private function extract_item_shipments_details(array $item): array {
+        $details = [];
+
+        foreach (($item['shipments'] ?? []) as $shipment) {
+            if (!is_array($shipment)) {
+                continue;
+            }
+
+            $address = [];
+            if (!empty($shipment['address']) && is_array($shipment['address'])) {
+                $address = $shipment['address'];
+            }
+
+            $copies = null;
+            if (isset($shipment['copies'])) {
+                $copies = is_numeric($shipment['copies']) ? (int) $shipment['copies'] : null;
+                if (is_int($copies) && $copies < 0) {
+                    $copies = null;
+                }
+            }
+
+            $delivery = null;
+            if (!empty($shipment['deliveryDate'])) {
+                $delivery = $this->fmt_date_ymdh((string) $shipment['deliveryDate']);
+            }
+
+            $latest = null;
+            if (!empty($shipment['latestDeliveryDate'])) {
+                $latest = $this->fmt_date_ymdh((string) $shipment['latestDeliveryDate']);
+            }
+
+            $details[] = [
+                'address'             => $address,
+                'copies'              => $copies,
+                'deliveryDate'        => $delivery,
+                'latestDeliveryDate'  => $latest,
+                'rawDeliveryDate'     => isset($shipment['deliveryDate']) ? (string) $shipment['deliveryDate'] : null,
+                'rawLatestDeliveryDate' => isset($shipment['latestDeliveryDate']) ? (string) $shipment['latestDeliveryDate'] : null,
+            ];
+        }
+
+        return $details;
+    }
+
+    private function build_address_lines(array $address): array {
+        $lines = [];
+
+        $full_name = trim(trim((string) ($address['firstName'] ?? '')) . ' ' . trim((string) ($address['lastName'] ?? '')));
+        if ($full_name !== '') {
+            $lines[] = $full_name;
+        }
+
+        $street_base = '';
+        if (!empty($address['fullstreet'])) {
+            $street_base = (string) $address['fullstreet'];
+        } elseif (!empty($address['street'])) {
+            $street_base = (string) $address['street'];
+        }
+
+        $house_number = trim(trim((string) ($address['houseNumber'] ?? '')) . ' ' . trim((string) ($address['houseNumberAddition'] ?? '')));
+        $house_number = preg_replace('/\s+/', ' ', $house_number);
+        if (!is_string($house_number)) {
+            $house_number = '';
+        }
+
+        if ($street_base !== '') {
+            $street_line = trim($street_base . ($house_number !== '' ? ' ' . $house_number : ''));
+            if ($street_line !== '') {
+                $lines[] = $street_line;
+            }
+        } elseif ($house_number !== '') {
+            $lines[] = $house_number;
+        }
+
+        $postcode = strtoupper(trim((string) ($address['postcode'] ?? '')));
+        $city = trim((string) ($address['city'] ?? ''));
+        $city_line = trim($postcode . ' ' . $city);
+        if ($city_line !== '') {
+            $lines[] = $city_line;
+        }
+
+        $country = trim((string) ($address['country'] ?? ''));
+        if ($country !== '') {
+            $lines[] = $country;
+        }
+
+        return $lines;
+    }
+
+    private function format_shipment_copies($copies): ?string {
+        if (!is_int($copies) || $copies < 0) {
+            return null;
+        }
+
+        $label = $copies === 1 ? 'stuk' : 'stuks';
+        return sprintf('%s %s', number_format_i18n($copies), $label);
+    }
+
+    private function format_shipment_delivery_text(array $shipment): ?string {
+        foreach (['deliveryDate', 'latestDeliveryDate'] as $key) {
+            if (!empty($shipment[$key]) && $shipment[$key] instanceof DateTime) {
+                return $shipment[$key]->format('d-m-Y');
+            }
+        }
+
+        foreach (['rawDeliveryDate', 'rawLatestDeliveryDate'] as $raw_key) {
+            if (empty($shipment[$raw_key]) || !is_string($shipment[$raw_key])) {
+                continue;
+            }
+
+            $raw = trim($shipment[$raw_key]);
+            if ($raw === '') {
+                continue;
+            }
+
+            if (preg_match('/^(\d{4}-\d{2}-\d{2})/', $raw, $m)) {
+                try {
+                    $dt = new DateTime($m[1]);
+                    return $dt->format('d-m-Y');
+                } catch (\Throwable $e) {
+                    // Val terug op de ruwe waarde hieronder
+                }
+                return $m[1];
+            }
+
+            return $raw;
+        }
+
         return null;
     }
 
