@@ -3,7 +3,7 @@
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
 
- * Version:     2.4.34
+ * Version:     2.5.0
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -12,42 +12,11 @@
 if (!defined('ABSPATH')) exit;
 
 require_once plugin_dir_path(__FILE__) . 'includes/class-rmh-invoice-ninja-client.php';
-require_once plugin_dir_path(__FILE__) . 'inc/helpers-productimg.php';
-
-if (is_admin()) {
-    add_action('admin_init', static function () {
-        if (!function_exists('current_user_can')) {
-            return;
-        }
-
-        if (!current_user_can('manage_options')) {
-            return;
-        }
-
-        require_once plugin_dir_path(__FILE__) . 'inc/admin-test-page.php';
-    });
-}
-
-add_action('init', function () {
-    $load_debug_shortcode = false;
-
-    if (function_exists('current_user_can')) {
-        $load_debug_shortcode = current_user_can('manage_options');
-    }
-
-    $load_debug_shortcode = apply_filters('rmh_enable_debug_shortcodes', $load_debug_shortcode);
-
-    if ($load_debug_shortcode) {
-        require_once __DIR__ . '/inc/debug-shortcode.php';
-    }
-});
-
-if (defined('WP_CLI') && WP_CLI) {
-    require_once plugin_dir_path(__FILE__) . 'inc/cli-commands.php';
-}
 
 class Printcom_Order_Tracker {
-    public const PLUGIN_VERSION = '2.4.34';
+    public const PLUGIN_VERSION = '2.5.0';
+    public const API_BASE_URL   = 'https://api.print.com/';
+    public const AUTH_URL       = 'https://api.print.com/login';
     public const USER_AGENT     = 'RMH-Printcom-Tracker/1.6.1 (+WordPress)';
 
     const OPT_SETTINGS     = 'printcom_ot_settings';
@@ -55,7 +24,6 @@ class Printcom_Order_Tracker {
     const OPT_STATE        = 'printcom_ot_state';
     const TRANSIENT_TOKEN  = 'printcom_ot_token';
     const TRANSIENT_PREFIX = 'printcom_ot_cache_';
-    const META_IMG_ID      = '_printcom_ot_image_id';    // (legacy) 1 afbeelding voor de hele pagina
     const META_ITEM_IMGS   = '_printcom_ot_item_images'; // per product (orderItemNumber => attachment_id)
 
     /** @var int[]|null Cached lijst met door de plugin beheerde orderpagina's (per request). */
@@ -139,27 +107,15 @@ class Printcom_Order_Tracker {
 
     public function register_settings() {
         register_setting(self::OPT_SETTINGS, self::OPT_SETTINGS, [$this,'sanitize_settings']);
-        register_setting(self::OPT_SETTINGS, 'rmh_disable_legacy_images', [$this,'sanitize_disable_legacy_images']);
         add_settings_section('printcom_ot_section','API-instellingen','__return_false',self::OPT_SETTINGS);
         add_settings_section('printcom_ot_invoice_ninja','Invoice Ninja',[$this,'render_invoice_ninja_section_description'],self::OPT_SETTINGS);
         $s = $this->get_settings();
         $add=function($section,$k,$label,$html,$desc=''){
             add_settings_field($k,$label,function() use($html,$desc){ echo $html; if($desc) echo '<p class="description">'.$desc.'</p>'; },self::OPT_SETTINGS,$section);
         };
-        $add('printcom_ot_section','api_base_url','API Base URL',sprintf('<input type="url" name="%s[api_base_url]" value="%s" class="regular-text" placeholder="https://api.print.com"/>',esc_attr(self::OPT_SETTINGS),esc_attr($s['api_base_url']??'https://api.print.com')));
-        $add('printcom_ot_section','auth_url','Auth URL (login)',sprintf('<input type="url" name="%s[auth_url]" value="%s" class="regular-text" placeholder="https://api.print.com/login"/>',esc_attr(self::OPT_SETTINGS),esc_attr($s['auth_url']??'https://api.print.com/login')),'Voor Print.com: <code>https://api.print.com/login</code>.');
-        ob_start(); ?>
-            <select name="<?php echo esc_attr(self::OPT_SETTINGS); ?>[grant_type]">
-                <option value="password" <?php selected($s['grant_type']??'password','password'); ?>>password (/login)</option>
-                <option value="client_credentials" <?php selected($s['grant_type']??'password','client_credentials'); ?>>client_credentials (fallback)</option>
-            </select>
-        <?php $add('printcom_ot_section','grant_type','Grant type',ob_get_clean());
-        $add('printcom_ot_section','client_id','Client ID (optioneel)',sprintf('<input type="text" name="%s[client_id]" value="%s" class="regular-text"/>',esc_attr(self::OPT_SETTINGS),esc_attr($s['client_id']??'')));
-        $add('printcom_ot_section','client_secret','Client Secret (optioneel)',sprintf('<input type="password" name="%s[client_secret]" value="%s" class="regular-text"/>',esc_attr(self::OPT_SETTINGS),esc_attr($s['client_secret']??'')));
         $add('printcom_ot_section','username','Username',sprintf('<input type="text" name="%s[username]" value="%s" class="regular-text"/>',esc_attr(self::OPT_SETTINGS),esc_attr($s['username']??'')));
         $add('printcom_ot_section','password','Password',sprintf('<input type="password" name="%s[password]" value="%s" class="regular-text"/>',esc_attr(self::OPT_SETTINGS),esc_attr($s['password']??'')));
         $add('printcom_ot_section','default_cache_ttl','Cache (minuten)',sprintf('<input type="number" min="0" step="1" name="%s[default_cache_ttl]" value="%d" class="small-text"/>',esc_attr(self::OPT_SETTINGS),isset($s['default_cache_ttl'])?(int)$s['default_cache_ttl']:5),'HOT=5m, COLD=24u.');
-        add_settings_field('rmh_disable_legacy_images','Legacy afbeeldingkoppeling uitschakelen',[$this,'render_disable_legacy_images_field'],self::OPT_SETTINGS,'printcom_ot_section');
 
         $enabled_checked = checked(!empty($s['rmh_integration_enabled']), true, false);
         $add('printcom_ot_invoice_ninja','rmh_integration_enabled','Integratie inschakelen',sprintf('<label><input type="checkbox" name="%1$s[rmh_integration_enabled]" value="1" %2$s/> Schakel Invoice Ninja integratie in</label>',esc_attr(self::OPT_SETTINGS),$enabled_checked),'Toon de betaallink op de track-&-trace pagina.');
@@ -177,11 +133,6 @@ class Printcom_Order_Tracker {
         $this->settings_cache = null;
 
         $o=[];
-        $o['api_base_url']=isset($in['api_base_url'])?trim(esc_url_raw($in['api_base_url'])):'https://api.print.com';
-        $o['auth_url']=isset($in['auth_url'])?trim(esc_url_raw($in['auth_url'])):'https://api.print.com/login';
-        $o['grant_type']=in_array($in['grant_type']??'password',['client_credentials','password'],true)?$in['grant_type']:'password';
-        $o['client_id']=trim(sanitize_text_field($in['client_id']??''));
-        $o['client_secret']=trim(sanitize_text_field($in['client_secret']??''));
         $o['username']=trim(sanitize_text_field($in['username']??''));
         $o['password']=trim((string)($in['password']??''));
         $o['default_cache_ttl']=max(0,(int)($in['default_cache_ttl']??5));
@@ -190,38 +141,6 @@ class Printcom_Order_Tracker {
         $o['rmh_in_api_token']=trim(sanitize_text_field($in['rmh_in_api_token']??''));
         $o['rmh_in_cache_minutes']=max(0,(int)($in['rmh_in_cache_minutes']??10));
         return $o;
-    }
-
-    public function sanitize_disable_legacy_images($value) {
-        if (defined('RMH_DISABLE_LEGACY_IMAGES')) {
-            return get_option('rmh_disable_legacy_images', 0);
-        }
-
-        return !empty($value) ? 1 : 0;
-    }
-
-    public function render_disable_legacy_images_field() {
-        $option_value = (int) get_option('rmh_disable_legacy_images', 0);
-        $disabled = false;
-
-        if (defined('RMH_DISABLE_LEGACY_IMAGES')) {
-            $option_value = RMH_DISABLE_LEGACY_IMAGES ? 1 : 0;
-            $disabled = true;
-        }
-
-        $checkbox = sprintf(
-            '<input type="checkbox" name="rmh_disable_legacy_images" value="1" %s %s/>',
-            checked($option_value, 1, false),
-            $disabled ? 'disabled="disabled"' : ''
-        );
-
-        echo '<label>' . $checkbox . ' ' . esc_html__('Alleen automatische productafbeeldingen en placeholders gebruiken.', 'printcom-order-tracker') . '</label>';
-
-        if ($disabled) {
-            echo '<p class="description">' . esc_html__('Deze instelling wordt overschreven door de constante RMH_DISABLE_LEGACY_IMAGES in wp-config.php.', 'printcom-order-tracker') . '</p>';
-        } else {
-            echo '<p class="description">' . esc_html__('Schakel deze optie in om legacy bijlagen als fallback uit te schakelen.', 'printcom-order-tracker') . '</p>';
-        }
     }
 
     private function normalize_invoice_ninja_base_url($url): string {
@@ -268,6 +187,7 @@ class Printcom_Order_Tracker {
                 <?php settings_fields(self::OPT_SETTINGS); do_settings_sections(self::OPT_SETTINGS); submit_button(); ?>
             </form>
             <hr/>
+            <h2>Debug opties</h2>
             <form method="post" action="<?php echo esc_url(admin_url('admin-post.php')); ?>" style="margin-top:10px;">
                 <?php wp_nonce_field('printcom_ot_test_conn','printcom_ot_test_conn_nonce'); ?>
                 <input type="hidden" name="action" value="printcom_ot_test_connection"/>
@@ -371,7 +291,11 @@ class Printcom_Order_Tracker {
                                     if($print===''){
                                         $error_msg='Het opgehaalde Print.com ordernummer bevat ongeldige tekens.';
                                     } else {
-                                        $res=$this->create_or_update_page_for_order($my,$print,$invoice);
+                                        $invoice_hash = '';
+                                        if (isset($details['invoice_hash']) && is_string($details['invoice_hash'])) {
+                                            $invoice_hash = trim($details['invoice_hash']);
+                                        }
+                                        $res=$this->create_or_update_page_for_order($my,$print,$invoice,$invoice_hash);
                                         if ($res){ [$page_id,$token]=$res; $url=add_query_arg('token',rawurlencode($token),get_permalink($page_id)); $msg=sprintf('Pagina voor order <strong>%s</strong> is aangemaakt/bijgewerkt: <a href="%s" target="_blank" rel="noopener">%s</a>. Print.com order: <strong>%s</strong>.',esc_html($my),esc_url($url),esc_html($url),esc_html($print)); }
                                         else { $error_msg='Er ging iets mis bij het aanmaken of bijwerken van de pagina.'; }
                                     }
@@ -402,13 +326,19 @@ class Printcom_Order_Tracker {
             </form>
             <h2>Bestaande orderpagina’s</h2>
             <?php if ($m): ?>
-                <table class="widefat striped"><thead><tr><th>Eigen nummer</th><th>Print.com nummer</th><th>Pagina</th><th>Link</th><th>Acties</th></tr></thead><tbody>
+                <table class="widefat striped"><thead><tr><th>Eigen nummer</th><th>Print.com nummer</th><th>Invoice Ninja hash</th><th>Pagina</th><th>Link</th><th>Acties</th></tr></thead><tbody>
                 <?php foreach($m as $own=>$info):
                     $pid   = (int)($info['page_id']??0);
                     $print = $info['print_order']??'';
                     $token = $info['token']??'';
                     $link  = $pid ? add_query_arg('token',rawurlencode($token),get_permalink($pid)) : '';
                     $title = $pid ? get_the_title($pid) : '';
+                    $invoice_hash = '';
+                    if (!empty($info['invoice_hash'])) {
+                        $invoice_hash = (string) $info['invoice_hash'];
+                    } elseif (!empty($info['invoice_id'])) {
+                        $invoice_hash = (string) $info['invoice_id'];
+                    }
 
                     $del = wp_nonce_url(
                         admin_url('admin-post.php?action=printcom_ot_delete_order&order='.rawurlencode($own).'&hard=1'),
@@ -418,6 +348,7 @@ class Printcom_Order_Tracker {
                 <tr>
                   <td><?php echo esc_html($own); ?></td>
                   <td><?php echo esc_html($print); ?></td>
+                  <td><?php if ($invoice_hash !== ''): echo esc_html($invoice_hash); else: ?><em>Onbekend</em><?php endif; ?></td>
                   <td><?php echo esc_html($title); ?> (ID: <?php echo (int)$pid; ?>)</td>
                   <td><?php if($link): ?><a href="<?php echo esc_url($link); ?>" target="_blank" rel="noopener"><?php echo esc_html($link); ?></a><?php endif; ?></td>
                   <td>
@@ -434,7 +365,7 @@ class Printcom_Order_Tracker {
         <?php
     }
 
-    private function create_or_update_page_for_order(string $ownOrder, string $printOrder, string $invoiceNumber = '') {
+    private function create_or_update_page_for_order(string $ownOrder, string $printOrder, string $invoiceNumber = '', string $invoiceHash = '') {
         $mappings = get_option(self::OPT_MAPPINGS, []);
         $existing_entry = isset($mappings[$ownOrder]) && is_array($mappings[$ownOrder]) ? $mappings[$ownOrder] : [];
         $title    = 'Bestelling '.$ownOrder;
@@ -477,13 +408,27 @@ class Printcom_Order_Tracker {
         }
 
         $invoiceNumber = trim(sanitize_text_field($invoiceNumber));
+        $invoiceHash   = trim(sanitize_text_field($invoiceHash));
 
         $entry = is_array($existing_entry) ? $existing_entry : [];
         $entry['page_id']    = (int)$page_id;
         $entry['print_order']= $printOrder;
         $entry['token']      = $token;
         if ($invoiceNumber !== '') {
+            $entry['invoice_number'] = $invoiceNumber;
+        } else {
+            unset($entry['invoice_number']);
+        }
+
+        if ($invoiceHash !== '') {
+            $entry['invoice_hash'] = $invoiceHash;
+            $entry['invoice_id']   = $invoiceHash;
+        } elseif ($invoiceNumber !== '') {
+            unset($entry['invoice_hash']);
             $entry['invoice_id'] = $invoiceNumber;
+        } else {
+            unset($entry['invoice_hash']);
+            unset($entry['invoice_id']);
         }
 
         $mappings[$ownOrder] = $entry;
@@ -652,12 +597,18 @@ class Printcom_Order_Tracker {
                 if (is_array($map)) {
                     $data = $this->api_get_order($map['print_order']);
                     if (!is_wp_error($data)) {
-                        $addr   = $this->extract_primary_shipping_address($data);
-                        $postal = strtoupper(preg_replace('/\\s+/', '', $addr['postcode'] ?? ''));
-                        if ($postcode_norm === $postal) {
-                            $url = add_query_arg('token', rawurlencode($map['token']), get_permalink((int)$map['page_id']));
-                            wp_safe_redirect($url);
-                            exit;
+                        $addresses = $this->extract_all_shipping_addresses($data);
+                        foreach ($addresses as $addr) {
+                            $postal = strtoupper(preg_replace('/\\s+/', '', $addr['postcode'] ?? ''));
+                            if ($postal === '') {
+                                continue;
+                            }
+
+                            if ($postcode_norm === $postal) {
+                                $url = add_query_arg('token', rawurlencode($map['token']), get_permalink((int)$map['page_id']));
+                                wp_safe_redirect($url);
+                                exit;
+                            }
                         }
                     }
                 }
@@ -678,8 +629,8 @@ class Printcom_Order_Tracker {
         $html .=     '<input class="rmh-ol__input" type="text" id="rmh_ol_order" name="rmh_ol_order" placeholder="RMH-12345 / 1234" required' . $order_attr . ' value="' . esc_attr($order_val) . '" />';
         $html .=   '</div>';
         $html .=   '<div class="rmh-ol__field">';
-        $html .=     '<label class="rmh-ol__label" for="rmh_ol_postcode">Postcode <span aria-hidden="true">*</span></label>';
-        $html .=     '<input class="rmh-ol__input" type="text" id="rmh_ol_postcode" name="rmh_ol_postcode" placeholder="1234AB (zonder spatie)" pattern="^[0-9]{4}[A-Za-z]{2}$" required' . $postcode_attr . ' value="' . esc_attr($postcode_val_raw) . '" />';
+        $html .=     '<label class="rmh-ol__label" for="rmh_ol_postcode">Postcode leveradres <span aria-hidden="true">*</span></label>';
+        $html .=     '<input class="rmh-ol__input" type="text" id="rmh_ol_postcode" name="rmh_ol_postcode" placeholder="Postcode leveradres (bijv. 1234AB)" pattern="^[0-9]{4}[A-Za-z]{2}$" required' . $postcode_attr . ' value="' . esc_attr($postcode_val_raw) . '" />';
         $html .=   '</div>';
         $html .=   '<div class="rmh-ol__actions"><button type="submit" class="rmh-ol__btn">Zoek bestelling</button></div>';
         $html .= '</form>';
@@ -846,8 +797,6 @@ class Printcom_Order_Tracker {
         }
 
         $html .= '<div class="rmh-ot__items"><h3 class="rmh-ot__overview-title">Overzicht van je bestelling</h3>';
-        $legacy_images_disabled = rmh_productimg_is_legacy_disabled();
-
         if($items && is_array($items)){
             $html .= '<div class="rmh-ot__grid">';
             foreach($items as $index=>$it){
@@ -857,11 +806,11 @@ class Printcom_Order_Tracker {
                 $title = $this->pretty_product_title($it);
 
                 // Afbeelding
-                $legacy_html = '';
-                if (!$legacy_images_disabled && $inum) {
+                $img_html = $this->placeholder_svg();
+                if ($inum) {
                     $att_id = $this->resolve_item_image_id($inum, $item_imgs);
                     if ($att_id > 0) {
-                        $legacy_html = wp_get_attachment_image(
+                        $img_html = wp_get_attachment_image(
                             $att_id,
                             'large',
                             false,
@@ -873,11 +822,6 @@ class Printcom_Order_Tracker {
                         );
                     }
                 }
-
-                $img_html = rmh_render_orderline_image($invoice_number, $line_index, [
-                    'legacy_html'      => $legacy_html,
-                    'placeholder_html' => $this->placeholder_svg(),
-                ]);
 
                 // Status badge (NL)
                 $it_status = isset($it['status']) ? (string)$it['status'] : '';
@@ -1523,6 +1467,10 @@ class Printcom_Order_Tracker {
             $candidates[] = $map_entry['invoice_id'];
         }
 
+        if (!empty($map_entry['invoice_number'])) {
+            $candidates[] = $map_entry['invoice_number'];
+        }
+
         foreach (['invoiceId','invoice_id','invoiceUuid','invoice_uuid','invoiceNumber','invoice_number'] as $field) {
             if (!empty($order_data[$field])) {
                 $candidates[] = $order_data[$field];
@@ -1706,33 +1654,7 @@ class Printcom_Order_Tracker {
     /* ===== Metaboxes ===== */
 
     public function add_metaboxes() {
-        add_meta_box('printcom_ot_image','Orderafbeelding (optioneel) — verouderd',[$this,'metabox_order_image'],'page','side','default');
         add_meta_box('printcom_ot_item_images','Productfoto’s (per item)',[$this,'metabox_item_images'],'page','normal','default');
-    }
-
-    public function metabox_order_image($post) {
-        if (strpos($post->post_content,'[print_order_status')===false){ echo '<p>Deze pagina lijkt geen Print.com orderpagina te zijn.</p>'; return; }
-        wp_enqueue_media();
-        $id=(int)get_post_meta($post->ID,self::META_IMG_ID,true);
-        $src=$id?wp_get_attachment_image_src($id,'medium'):null;
-        ?>
-        <p>Oud veld (1 afbeelding voor de hele pagina). Gebruik liever de metabox “Productfoto’s (per item)”.</p>
-        <div id="rmh-ot-image-preview" style="margin-bottom:10px;"><?php echo $src?'<img src="'.esc_url($src[0]).'" style="max-width:100%;height:auto;" />':'<em>Geen afbeelding gekozen.</em>'; ?></div>
-        <input type="hidden" id="rmh-ot-image-id" name="printcom_ot_image_id" value="<?php echo esc_attr($id); ?>"/>
-        <button type="button" class="button" id="rmh-ot-image-upload">Afbeelding kiezen</button>
-        <button type="button" class="button" id="rmh-ot-image-remove" <?php disabled(!$id); ?>>Verwijderen</button>
-        <script>
-        (function($){$(function(){
-            let frame;
-            $('#rmh-ot-image-upload').on('click',function(e){e.preventDefault(); if(frame){frame.open();return;}
-                frame = wp.media({title:'Kies of upload afbeelding',button:{text:'Gebruik deze afbeelding'},multiple:false});
-                frame.on('select',function(){const a=frame.state().get('selection').first().toJSON();$('#rmh-ot-image-id').val(a.id);$('#rmh-ot-image-preview').html('<img src="'+a.url+'" style="max-width:100%;height:auto;" />');$('#rmh-ot-image-remove').prop('disabled',false);});
-                frame.open();
-            });
-            $('#rmh-ot-image-remove').on('click',function(e){e.preventDefault();$('#rmh-ot-image-id').val('');$('#rmh-ot-image-preview').html('<em>Geen afbeelding gekozen.</em>');$(this).prop('disabled',true);});
-        });})(jQuery);
-        </script>
-        <?php
     }
 
     public function metabox_item_images($post) {
@@ -1842,10 +1764,6 @@ class Printcom_Order_Tracker {
     public function save_metaboxes($post_id) {
         if (defined('DOING_AUTOSAVE') && DOING_AUTOSAVE) return;
         if (!current_user_can('edit_post',$post_id)) return;
-        if (isset($_POST['printcom_ot_image_id'])) {
-            $id=(int)$_POST['printcom_ot_image_id'];
-            if ($id>0) update_post_meta($post_id,self::META_IMG_ID,$id); else delete_post_meta($post_id,self::META_IMG_ID);
-        }
         if (isset($_POST['printcom_ot_item_key'], $_POST['printcom_ot_item_media']) && is_array($_POST['printcom_ot_item_key'])) {
             $keys=array_map('sanitize_text_field',array_map('wp_unslash',$_POST['printcom_ot_item_key']));
             $meds=array_map('intval',$_POST['printcom_ot_item_media']);
@@ -2042,18 +1960,50 @@ class Printcom_Order_Tracker {
     }
 
     private function extract_primary_shipping_address(array $order): ?array {
-        // Neemt adres uit order-level shipments, anders uit eerste item->shipments
+        $addresses = $this->extract_all_shipping_addresses($order);
+        return $addresses[0] ?? null;
+    }
+
+    private function extract_all_shipping_addresses(array $order): array {
+        $addresses = [];
+        $seen = [];
+
+        $add = static function ($address) use (&$addresses, &$seen): void {
+            if (!is_array($address) || !$address) {
+                return;
+            }
+
+            $encoded = wp_json_encode($address);
+            if (!is_string($encoded) || $encoded === '') {
+                $encoded = serialize($address);
+            }
+
+            $hash = md5($encoded);
+            if (isset($seen[$hash])) {
+                return;
+            }
+
+            $seen[$hash] = true;
+            $addresses[] = $address;
+        };
+
         $ships = $order['shipments'] ?? [];
-        foreach ($ships as $s) {
-            if (!empty($s['address'])) return $s['address'];
-        }
-        $items = $order['items'] ?? [];
-        foreach ($items as $it) {
-            foreach (($it['shipments'] ?? []) as $s) {
-                if (!empty($s['address'])) return $s['address'];
+        foreach ($ships as $shipment) {
+            if (!empty($shipment['address'])) {
+                $add($shipment['address']);
             }
         }
-        return null;
+
+        $items = $order['items'] ?? [];
+        foreach ($items as $item) {
+            foreach (($item['shipments'] ?? []) as $shipment) {
+                if (!empty($shipment['address'])) {
+                    $add($shipment['address']);
+                }
+            }
+        }
+
+        return $addresses;
     }
 
     private function classify_item_status(string $status): string {
@@ -2324,8 +2274,7 @@ class Printcom_Order_Tracker {
     /* ===== API client ===== */
 
     private function api_get_order($orderNum) {
-        $s = $this->get_settings();
-        $base = rtrim($s['api_base_url'] ?? 'https://api.print.com', '/');
+        $base = rtrim(self::API_BASE_URL, '/');
         $url  = $base.'/orders/'.rawurlencode($orderNum);
 
         $token = $this->get_access_token();
@@ -2390,83 +2339,44 @@ class Printcom_Order_Tracker {
         if ($cached && !$force_refresh) return $cached;
 
         $s=$this->get_settings();
-        $auth=trim($s['auth_url']??''); if(!$auth) return new WP_Error('printcom_auth_missing','Auth URL niet ingesteld.');
         $username=isset($s['username'])?trim($s['username']):'';
         $password=isset($s['password'])?(string)$s['password']:'';
         $password=preg_replace("/\r\n|\r|\n/","",$password);
         $ua=self::USER_AGENT;
 
-        $is_print_login=(stripos($auth,'/login')!==false);
-        if ($is_print_login){
-            if ($username==='' || $password==='') return new WP_Error('printcom_auth_missing','Username/Password ontbreken.');
-            $payload=wp_json_encode(['credentials'=>['username'=>$username,'password'=>$password]]);
-            $res = wp_remote_post($auth, [
-                'headers' => [
-                    'Accept'       => 'application/json',
-                    'Content-Type' => 'application/json',
-                    'User-Agent'   => $ua,
-                ],
-                'body'    => $payload,
-                'timeout' => 20,
-            ]);
-            if (is_wp_error($res)) return $res;
-            $code=wp_remote_retrieve_response_code($res); $raw=wp_remote_retrieve_body($res);
-            if ($code===401){
-                $err='Auth fout (401). Controleer login & URL.'; $j=json_decode($raw,true);
-                if(is_array($j)){ if(!empty($j['message'])) $err.=' Detail: '.sanitize_text_field($j['message']); if(!empty($j['error'])) $err.=' ('.sanitize_text_field($j['error']).')'; }
-                elseif(!empty($raw)) $err.=' Detail: '.sanitize_text_field($raw);
-                return new WP_Error('printcom_auth_error',$err);
-            }
-            if ($code<200 || $code>=300) return new WP_Error('printcom_auth_error','Auth fout ('.$code.'). Raw: '.sanitize_text_field($raw));
-            $j=json_decode($raw,true);
-            $token=null;
-            if(is_array($j)) $token=$j['access_token']??$j['token']??$j['jwt']??null;
-            if(!$token && is_string($raw) && strlen($raw)>20 && strpos($raw,'{')===false) $token=trim($raw);
-            if(!$token) return new WP_Error('printcom_auth_error','Kon JWT niet vinden in login-response. Raw: '.sanitize_text_field($raw));
+        if ($username==='' || $password==='') return new WP_Error('printcom_auth_missing','Username/Password ontbreken.');
 
-            // normaliseer (Bearer / quotes)
-            $token=(string)$token; $token=preg_replace('/^\s*Bearer\s+/i','',$token); $token=trim($token);
-            if ((substr($token,0,1)==='"' && substr($token,-1)==='"')||(substr($token,0,1)==="'" && substr($token,-1)==="'")) $token=substr($token,1,-1);
-
-            set_transient(self::TRANSIENT_TOKEN,$token,max(60,(7*DAY_IN_SECONDS)-60));
-            return $token;
-        }
-
-        // Fallback OAuth
-        $grant=$s['grant_type']??'client_credentials';
-        $body=['grant_type'=>$grant];
-        if ($grant==='client_credentials'){
-            if (empty($s['client_id'])||empty($s['client_secret'])) return new WP_Error('printcom_auth_missing','Client ID/Secret ontbreken.');
-            $body['client_id']=$s['client_id']; $body['client_secret']=$s['client_secret'];
-        } else {
-            if ($username===''||$password==='') return new WP_Error('printcom_auth_missing','Username/Password ontbreken.');
-            if (!empty($s['client_id'])) $body['client_id']=$s['client_id'];
-            if (!empty($s['client_secret'])) $body['client_secret']=$s['client_secret'];
-            $body['username']=$username; $body['password']=$password;
-        }
-        $res = wp_remote_post($auth, [
+        $payload=wp_json_encode(['credentials'=>['username'=>$username,'password'=>$password]]);
+        $res = wp_remote_post(self::AUTH_URL, [
             'headers' => [
-                'Accept'     => 'application/json',
-                'User-Agent' => $ua,
+                'Accept'       => 'application/json',
+                'Content-Type' => 'application/json',
+                'User-Agent'   => $ua,
             ],
-            'body'    => $body,
+            'body'    => $payload,
             'timeout' => 20,
         ]);
         if (is_wp_error($res)) return $res;
         $code=wp_remote_retrieve_response_code($res); $raw=wp_remote_retrieve_body($res);
         if ($code===401){
-            $err='Auth fout (401). Controleer OAuth en credentials.'; $j=json_decode($raw,true);
-            if(is_array($j)){ if(!empty($j['error_description'])) $err.=' '.sanitize_text_field($j['error_description']); if(!empty($j['error'])) $err.=' ('.sanitize_text_field($j['error']).')'; }
+            $err='Auth fout (401). Controleer login.'; $j=json_decode($raw,true);
+            if(is_array($j)){ if(!empty($j['message'])) $err.=' Detail: '.sanitize_text_field($j['message']); if(!empty($j['error'])) $err.=' ('.sanitize_text_field($j['error']).')'; }
             elseif(!empty($raw)) $err.=' Detail: '.sanitize_text_field($raw);
             return new WP_Error('printcom_auth_error',$err);
         }
         if ($code<200 || $code>=300) return new WP_Error('printcom_auth_error','Auth fout ('.$code.'). Raw: '.sanitize_text_field($raw));
-        $j=json_decode($raw,true); if(!is_array($j)) return new WP_Error('printcom_auth_error','Ongeldige auth-response.');
-        $token=$j['access_token']??null; $expires=isset($j['expires_in'])?(int)$j['expires_in']:(7*DAY_IN_SECONDS);
-        if(!$token) return new WP_Error('printcom_auth_error','Kon access_token niet vinden in auth-response. Raw: '.sanitize_text_field($raw));
+        $j=json_decode($raw,true);
+        $token=null;
+        if(is_array($j)) $token=$j['access_token']??$j['token']??$j['jwt']??null;
+        if(!$token && is_string($raw) && strlen($raw)>20 && strpos($raw,'{')===false) $token=trim($raw);
+        if(!$token) return new WP_Error('printcom_auth_error','Kon JWT niet vinden in login-response. Raw: '.sanitize_text_field($raw));
+
+        // normaliseer (Bearer / quotes)
         $token=(string)$token; $token=preg_replace('/^\s*Bearer\s+/i','',$token); $token=trim($token);
         if ((substr($token,0,1)==='"' && substr($token,-1)==='"')||(substr($token,0,1)==="'" && substr($token,-1)==="'")) $token=substr($token,1,-1);
-        set_transient(self::TRANSIENT_TOKEN,$token,max(60,$expires-60)); return $token;
+
+        set_transient(self::TRANSIENT_TOKEN,$token,max(60,(7*DAY_IN_SECONDS)-60));
+        return $token;
     }
 
     /* ===== State/TTL ===== */
@@ -2641,12 +2551,12 @@ add_action('admin_post_printcom_ot_test_connection', function(){
     if(!current_user_can('manage_options')) wp_die('Unauthorized');
     if(empty($_POST['printcom_ot_test_conn_nonce']) || !wp_verify_nonce($_POST['printcom_ot_test_conn_nonce'],'printcom_ot_test_conn')) wp_die('Nonce invalid');
     $s    = get_option(Printcom_Order_Tracker::OPT_SETTINGS, []);
-    $auth = $s['auth_url'] ?? '';
+    $auth = Printcom_Order_Tracker::AUTH_URL;
     $u    = trim($s['username'] ?? '');
     $p    = preg_replace("/\r\n|\r|\n/", '', (string) ($s['password'] ?? ''));
     $ua   = Printcom_Order_Tracker::USER_AGENT;
 
-    if(!$auth||!$u||!$p){ $msg='❌ Ontbrekende instellingen (auth_url/username/password).'; }
+    if(!$u||!$p){ $msg='❌ Ontbrekende instellingen (username/password).'; }
     else{
         $payload = wp_json_encode(['credentials' => ['username' => $u, 'password' => $p]]);
         $args    = [
@@ -2675,7 +2585,7 @@ add_action('admin_post_printcom_ot_test_order', function(){
     if(is_wp_error($token)){ $msg='❌ Tokenfout: '.esc_html($token->get_error_message()); }
     else{
         $prefix=substr($token,0,16); $len=strlen($token);
-        $s=get_option(Printcom_Order_Tracker::OPT_SETTINGS,[]); $base=rtrim($s['api_base_url']??'https://api.print.com','/'); $url=$base.'/orders/'.rawurlencode($order);
+        $base=rtrim(Printcom_Order_Tracker::API_BASE_URL,'/'); $url=$base.'/orders/'.rawurlencode($order);
         $res = wp_remote_get($url, [
             'headers' => [
                 'Authorization' => 'Bearer ' . $token,

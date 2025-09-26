@@ -19,8 +19,7 @@ Tokens worden automatisch vernieuwd. Ontworpen om goed samen te werken met **Div
 - Zoekformulier op ordernummer + postcode via shortcode [print_order_lookup]
 - Cache instelbaar (default 30 minuten)
 - Ondersteuning voor eigen afbeelding per orderpagina
-- Automatische productafbeeldingen vanuit `/productimg/` op basis van factuurnummer en regelnummers (met fallback op legacy bijlagen en placeholders)
-- Ingebouwde debugtools voor productafbeeldingen (shortcode, admin testpagina met cache-buster knop en WP-CLI commando)
+- Handmatige productfoto’s per orderItemNumber via de metabox “Productfoto’s (per item)”
 - Tokens worden automatisch vernieuwd
 
 ## Gebruik
@@ -35,33 +34,11 @@ Tokens worden automatisch vernieuwd. Ontworpen om goed samen te werken met **Div
 - Verwijder je een order, dan wist de plugin ook de gekoppelde pagina, cache en statusgegevens.
 
 ### Productafbeeldingen
-- Bestandsnamen volgen het patroon `{factuurnummer}-{regelindex}.{ext}` waarbij de regelindex 1-based is (1, 2, 3, …). De sleutel is dus je eigen factuurnummer plus de positie van de orderregel op de pagina.
-- Ondersteunde extensies zijn `png`, `jpg`, `jpeg` en `webp` (hoofd-/kleine letters zijn toegestaan). Varianten met `@2x` of `-large` worden automatisch aan `srcset` en `sizes` toegevoegd voor scherpe retina-beelden.
-- Zoekvolgorde voor afbeeldingen:
-  1. `ABSPATH . 'productimg'`
-  2. `$_SERVER['DOCUMENT_ROOT'] . '/productimg'`
-  3. `home_path() . 'productimg'`
-  De URL van een gevonden bestand wordt altijd opgebouwd met `home_url()` zodat installaties in een submap geen ongewenste `/wp/` prefix krijgen. Je kunt extra paden toevoegen via de filter `rmh_productimg_bases`.
-- Vind je meerdere varianten, dan genereert de plugin nette HTML: `<figure class="rmh-orderline-image"><img ... /></figure>` met `loading="lazy"` en `decoding="async"`.
-- Wanneer er geen bestand wordt gevonden, valt de weergave terug op legacy bijlagen (mits ingeschakeld) en daarna op de ingebouwde placeholder.
-- Resultaten van zoekacties worden gecachet via transients. Gebruik de adminknop (of optie `rmh_img_cache_buster`/constante `RMH_IMG_CACHE_BUSTER`) om caches direct te vernieuwen. TTL’s zijn instelbaar via `RMH_IMG_CACHE_TTL_HIT` en `RMH_IMG_CACHE_TTL_MISS`. Extra filters: `rmh_productimg_exts`, `rmh_productimg_enable_autoload` en `rmh_productimg_render_html` voor geavanceerde aanpassingen.
-
-### Debuggen productafbeeldingen
-- **Shortcode**: `[rmh_test_image invoice="RMH-0021" index="1"]` toont het pad, de URL en de afbeelding (alleen beschikbaar voor beheerders tenzij je de filter `rmh_enable_debug_shortcodes` activeert).
-- **Admin testpagina**: via **Instellingen → RMH Productimg Test** krijg je per lookup de gekozen basis, alle kandidaten, hit/miss, cache-info én een cache-buster knop.
-- **WP-CLI**: `wp rmh img-test RMH-0021 1` controleert dezelfde resolver en geeft pad + URL terug. Bij een miss krijg je een waarschuwing en exitcode 1.
-- Nieuwe bestanden direct testen? Gebruik de cache-buster knop, wijzig de optie `rmh_img_cache_buster` of zet tijdelijk `define('RMH_IMG_CACHE_BUSTER', 'v2');` in `wp-config.php` zodat alle caches worden vernieuwd.
-- Bij `WP_DEBUG` verschijnt per orderregel een HTML-comment `<!-- RMH dbg … -->` met de gebruikte basis, cache-status en fallback.
-
-### Diagnose & cache
-- De admin testpagina toont nu per lookup de geselecteerde basis, alle filekandidaten, cache-actie (hit/miss) en een voorbeeldpad/URL voor DOCUMENT_ROOT (bijv. `/var/www/.../productimg/` → `https://rikkermediahub.com/productimg/`).
-- Met de knop **Cache buster verhogen** wijzig je direct de optie `rmh_img_cache_buster`; de resolver combineert die waarde met een eventuele constante `RMH_IMG_CACHE_BUSTER` voor de cache-salt.
-- TTL’s voor hits en misses blijven instelbaar via `RMH_IMG_CACHE_TTL_HIT` en `RMH_IMG_CACHE_TTL_MISS` (defaults respectievelijk 15 en 5 minuten).
+- Gebruik de metabox **Productfoto’s (per item)** om per `orderItemNumber` een afbeelding te kiezen. De gekozen bijlage verschijnt bij de juiste regel op de orderpagina.
+- Wanneer er geen afbeelding is gekoppeld, toont de plugin automatisch een neutrale placeholder.
 
 ### Configuratie
-- `RMH_DISABLE_LEGACY_IMAGES` – schakelt legacy bijlagen als fallback uit.
-- `rmh_img_cache_buster` (option) / `RMH_IMG_CACHE_BUSTER` (constante) – voeg een willekeurige string toe om caches direct ongeldig te maken.
-- `RMH_IMG_CACHE_TTL_HIT` / `RMH_IMG_CACHE_TTL_MISS` – pas de TTL (in seconden) voor respectievelijk hits en misses aan.
+Deze versie heeft geen extra configuratieopties voor automatische productafbeeldingen; alle koppelingen verlopen handmatig via de metabox.
 
 ### Cache & tokens
 - API-resultaten worden als transient opgeslagen. Actieve orders worden standaard 5 minuten gecachet; afgeronde orders blijven 24 uur warm voor snelle laadtijden.
