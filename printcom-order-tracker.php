@@ -3,7 +3,7 @@
  * Plugin Name: Print.com Order Tracker (Track & Trace Pagina's)
  * Description: Maakt per ordernummer automatisch een track & trace pagina aan en toont live orderstatus, items en verzendinformatie via de Print.com API. Tokens worden automatisch vernieuwd. Divi-vriendelijk.
 
- * Version:     2.5.2
+ * Version:     2.5.3
  * Author:      RikkerMediaHub
  * License:     GNU GPLv2
  * Text Domain: printcom-order-tracker
@@ -14,7 +14,7 @@ if (!defined('ABSPATH')) exit;
 require_once plugin_dir_path(__FILE__) . 'includes/class-rmh-invoice-ninja-client.php';
 
 class Printcom_Order_Tracker {
-    public const PLUGIN_VERSION = '2.5.2';
+    public const PLUGIN_VERSION = '2.5.3';
     public const API_BASE_URL   = 'https://api.print.com/';
     public const AUTH_URL       = 'https://api.print.com/login';
     public const USER_AGENT     = 'RMH-Printcom-Tracker/1.6.1 (+WordPress)';
@@ -895,15 +895,11 @@ class Printcom_Order_Tracker {
                         $address_lines = array_filter(array_map('trim', $this->build_address_lines($shipment_info['address'])));
                     }
 
-                    $copies_text   = $this->format_shipment_copies($shipment_info['copies'] ?? null);
-                    $delivery_text = $this->format_shipment_delivery_text($shipment_info);
+                    $copies_text = $this->format_shipment_copies($shipment_info['copies'] ?? null);
 
                     $meta_parts = [];
-                    if ($copies_text) {
+                    if ($multiple_shipments && $copies_text) {
                         $meta_parts[] = $copies_text;
-                    }
-                    if ($delivery_text) {
-                        $meta_parts[] = sprintf('Leverdatum: %s', $delivery_text);
                     }
 
                     if (!$address_lines && !$meta_parts) {
